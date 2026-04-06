@@ -19,9 +19,9 @@ if getattr(sys, "frozen", False):
     if _bundle_dir not in sys.path:
         sys.path.insert(0, _bundle_dir)
 
-from ph3_api import PH3Client, Patient, SignResult
+from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
 CONFIG_FILE = "gulfsign_config.json"
 
@@ -190,20 +190,25 @@ class GulfSignApp(tk.Tk):
         r1 = ttk.Frame(frame)
         r1.pack(fill=tk.X, pady=(4, 0))
 
-        ttk.Label(r1, text="协议到期日(前):").pack(side=tk.LEFT)
-        self.var_expire_before = tk.StringVar()
-        ttk.Entry(r1, textvariable=self.var_expire_before, width=12).pack(
-            side=tk.LEFT, padx=(4, 16)
+        ttk.Label(r1, text="协议结束日期:").pack(side=tk.LEFT)
+        self.var_expire_start = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_expire_start, width=10).pack(
+            side=tk.LEFT, padx=(4, 0)
         )
-        ttk.Label(r1, text="(格式: 20260404，留空不限)").pack(side=tk.LEFT)
-        ttk.Label(r1, text="    姓名:").pack(side=tk.LEFT)
+        ttk.Label(r1, text="~").pack(side=tk.LEFT)
+        self.var_expire_end = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_expire_end, width=10).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Label(r1, text="(如20250101~20261231)").pack(side=tk.LEFT)
+        ttk.Label(r1, text="  姓名:").pack(side=tk.LEFT)
         self.var_name_filter = tk.StringVar()
-        ttk.Entry(r1, textvariable=self.var_name_filter, width=12).pack(
-            side=tk.LEFT, padx=(4, 16)
+        ttk.Entry(r1, textvariable=self.var_name_filter, width=10).pack(
+            side=tk.LEFT, padx=(4, 8)
         )
         ttk.Label(r1, text="身份证:").pack(side=tk.LEFT)
         self.var_idcard_filter = tk.StringVar()
-        ttk.Entry(r1, textvariable=self.var_idcard_filter, width=20).pack(
+        ttk.Entry(r1, textvariable=self.var_idcard_filter, width=18).pack(
             side=tk.LEFT, padx=(4, 0)
         )
 
@@ -303,38 +308,85 @@ class GulfSignApp(tk.Tk):
         self.btn_stop = ttk.Button(
             r0, text="⏹ 停止", command=self._on_stop, state=tk.DISABLED,
         )
-        self.btn_stop.pack(side=tk.LEFT, padx=(0, 16))
+        self.btn_stop.pack(side=tk.LEFT, padx=(0, 12))
 
         ttk.Label(r0, text="间隔(秒):").pack(side=tk.LEFT)
         self.var_delay = tk.StringVar(value="0.5")
-        ttk.Entry(r0, textvariable=self.var_delay, width=5).pack(
-            side=tk.LEFT, padx=(4, 16)
+        ttk.Entry(r0, textvariable=self.var_delay, width=4).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+
+        ttk.Label(r0, text="签约人数:").pack(side=tk.LEFT)
+        self.var_max_count = tk.StringVar(value="")
+        ttk.Entry(r0, textvariable=self.var_max_count, width=5).pack(
+            side=tk.LEFT, padx=(4, 8)
         )
 
         ttk.Label(r0, text="签约医生:").pack(side=tk.LEFT)
         self.var_doctor = tk.StringVar()
-        ttk.Entry(r0, textvariable=self.var_doctor, width=10).pack(
-            side=tk.LEFT, padx=(4, 16)
+        ttk.Entry(r0, textvariable=self.var_doctor, width=8).pack(
+            side=tk.LEFT, padx=(4, 8)
         )
 
         ttk.Label(r0, text="签约团队:").pack(side=tk.LEFT)
         self.var_team = tk.StringVar()
-        ttk.Entry(r0, textvariable=self.var_team, width=20).pack(
+        ttk.Entry(r0, textvariable=self.var_team, width=16).pack(
             side=tk.LEFT, padx=(4, 0)
         )
 
         r1 = ttk.Frame(frame)
-        r1.pack(fill=tk.X, pady=(6, 0))
+        r1.pack(fill=tk.X, pady=(4, 0))
 
-        self.progress = ttk.Progressbar(r1, mode="determinate", length=400)
+        ttk.Label(r1, text="人群类型:").pack(side=tk.LEFT)
+        pop_values = [POPULATION_TYPES[k] for k in sorted(POPULATION_TYPES, key=int)]
+        self.var_pop_type = tk.StringVar(value="一般人群")
+        ttk.Combobox(
+            r1, textvariable=self.var_pop_type, width=14, state="readonly",
+            values=pop_values,
+        ).pack(side=tk.LEFT, padx=(4, 12))
+
+        ttk.Label(r1, text="协议开始:").pack(side=tk.LEFT)
+        self.var_agree_start = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_agree_start, width=10).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        ttk.Label(r1, text="协议结束:").pack(side=tk.LEFT)
+        self.var_agree_end = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_agree_end, width=10).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        ttk.Label(r1, text="(留空=自动,如20260101~20291231)").pack(side=tk.LEFT)
+
+        r2 = ttk.Frame(frame)
+        r2.pack(fill=tk.X, pady=(4, 0))
+
+        self.var_auto_void = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            r2, text="自动作废(已签约重签)", variable=self.var_auto_void,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_del_doctor = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            r2, text="删除医生申请", variable=self.var_del_doctor,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_del_resident = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            r2, text="删除居民申请", variable=self.var_del_resident,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        r3 = ttk.Frame(frame)
+        r3.pack(fill=tk.X, pady=(4, 0))
+
+        self.progress = ttk.Progressbar(r3, mode="determinate", length=400)
         self.progress.pack(side=tk.LEFT, padx=(0, 12))
 
         self.var_progress_text = tk.StringVar(value="就绪")
-        ttk.Label(r1, textvariable=self.var_progress_text).pack(side=tk.LEFT)
+        ttk.Label(r3, textvariable=self.var_progress_text).pack(side=tk.LEFT)
 
         self.var_stats = tk.StringVar(value="")
         ttk.Label(
-            r1, textvariable=self.var_stats, style="Info.TLabel"
+            r3, textvariable=self.var_stats, style="Info.TLabel"
         ).pack(side=tk.RIGHT)
 
     # ---- 日志区 ----
@@ -385,6 +437,14 @@ class GulfSignApp(tk.Tk):
             self.var_team.set(c["team"])
         if c.get("delay"):
             self.var_delay.set(c["delay"])
+        if c.get("pop_type"):
+            self.var_pop_type.set(c["pop_type"])
+        if c.get("agree_start"):
+            self.var_agree_start.set(c["agree_start"])
+        if c.get("agree_end"):
+            self.var_agree_end.set(c["agree_end"])
+        if c.get("max_count"):
+            self.var_max_count.set(c["max_count"])
 
     def _save_current_config(self):
         save_config({
@@ -394,6 +454,10 @@ class GulfSignApp(tk.Tk):
             "doctor": self.var_doctor.get(),
             "team": self.var_team.get(),
             "delay": self.var_delay.get(),
+            "pop_type": self.var_pop_type.get(),
+            "agree_start": self.var_agree_start.get(),
+            "agree_end": self.var_agree_end.get(),
+            "max_count": self.var_max_count.get(),
         })
 
     # ================================================================
@@ -477,9 +541,12 @@ class GulfSignApp(tk.Tk):
 
     def _get_extra_filters(self) -> dict:
         extra = {}
-        exp = self.var_expire_before.get().strip()
-        if exp:
-            extra["XYJSRQ_END"] = exp
+        exp_s = self.var_expire_start.get().strip()
+        exp_e = self.var_expire_end.get().strip()
+        if exp_s:
+            extra["XYJSRQ_BEGIN"] = exp_s
+        if exp_e:
+            extra["XYJSRQ_END"] = exp_e
         nm = self.var_name_filter.get().strip()
         if nm:
             extra["XM"] = nm
@@ -634,6 +701,13 @@ class GulfSignApp(tk.Tk):
     # 批量签约
     # ================================================================
 
+    def _get_pop_type_code(self) -> str:
+        name = self.var_pop_type.get()
+        for code, label in POPULATION_TYPES.items():
+            if label == name:
+                return code
+        return "0"
+
     def _on_start_signing(self):
         if self._signing:
             return
@@ -646,6 +720,15 @@ class GulfSignApp(tk.Tk):
         if not targets:
             messagebox.showwarning("提示", "请选择要签约的居民")
             return
+
+        max_count_str = self.var_max_count.get().strip()
+        if max_count_str:
+            try:
+                max_count = int(max_count_str)
+                if max_count > 0 and max_count < len(targets):
+                    targets = targets[:max_count]
+            except ValueError:
+                pass
 
         msg = "即将对 %d 位居民执行自动签约，是否继续？" % len(targets)
         if not messagebox.askyesno("确认签约", msg):
@@ -680,11 +763,40 @@ class GulfSignApp(tk.Tk):
 
         doctor = self.var_doctor.get().strip()
         team = self.var_team.get().strip()
+        pop_code = self._get_pop_type_code()
+        agree_start = self.var_agree_start.get().strip()
+        agree_end = self.var_agree_end.get().strip()
+        auto_void = self.var_auto_void.get()
+        del_doctor = self.var_del_doctor.get()
+        del_resident = self.var_del_resident.get()
+
+        opts = []
+        if auto_void:
+            opts.append("自动作废")
+        if del_doctor:
+            opts.append("删除医生申请")
+        if del_resident:
+            opts.append("删除居民申请")
+        if agree_start or agree_end:
+            opts.append("协议期: %s~%s" % (agree_start or "自动", agree_end or "自动"))
+        if pop_code != "0":
+            opts.append("人群: %s" % self.var_pop_type.get())
+        if opts:
+            self._log("选项: %s" % ", ".join(opts), "info")
 
         self._save_current_config()
 
+        sign_opts = {
+            "pop_code": pop_code,
+            "agree_start": agree_start,
+            "agree_end": agree_end,
+            "auto_void": auto_void,
+            "del_doctor": del_doctor,
+            "del_resident": del_resident,
+        }
+
         def worker():
-            self._batch_sign_worker(targets, delay, doctor, team)
+            self._batch_sign_worker(targets, delay, doctor, team, sign_opts)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -694,7 +806,9 @@ class GulfSignApp(tk.Tk):
         delay: float,
         doctor: str,
         team: str,
+        sign_opts: dict = None,
     ):
+        opts = sign_opts or {}
         for i, patient in enumerate(targets):
             if self._stop_event.is_set():
                 self.after(0, lambda: self._log("已手动停止", "warn"))
@@ -722,6 +836,12 @@ class GulfSignApp(tk.Tk):
                 delay=delay,
                 contract_status=patient.contract_status,
                 contract_code=patient.contract_code,
+                auto_void=opts.get("auto_void", False),
+                auto_delete_doctor=opts.get("del_doctor", False),
+                auto_delete_resident=opts.get("del_resident", False),
+                service_type=opts.get("pop_code", "0"),
+                agreement_start=opts.get("agree_start", ""),
+                agreement_end=opts.get("agree_end", ""),
             )
 
             self.after(0, lambda r=result, idx=i: self._on_sign_result(r, idx))
@@ -739,24 +859,28 @@ class GulfSignApp(tk.Tk):
         if result.success and result.step == "confirm":
             self._sign_success += 1
             self._log("  ✓ %s 已签约 (%.1f秒)" % (label, result.elapsed), "ok")
-            if result.person_id in children:
-                self.tree.item(result.person_id, tags=("signed_ok",))
+            tag = "signed_ok"
         elif result.success and result.step == "initiate":
             self._sign_success += 1
             self._log(
-                "  ◎ %s 已发起签约 (%.1f秒) [待健康卡确认]" % (label, result.elapsed),
+                "  ◎ %s 已发起签约 (%.1f秒) [待确认]" % (label, result.elapsed),
                 "warn",
             )
-            if result.person_id in children:
-                self.tree.item(result.person_id, tags=("signed_ok",))
+            tag = "signed_ok"
         else:
             self._sign_fail += 1
+            step_label = {
+                "void": "作废", "delete": "删除",
+                "initiate": "发起", "confirm": "确认",
+            }.get(result.step, result.step)
             self._log(
-                "  ✗ %s 失败 [%s]: %s" % (label, result.step, result.error),
+                "  ✗ %s 失败 [%s]: %s" % (label, step_label, result.error),
                 "err",
             )
-            if result.person_id in children:
-                self.tree.item(result.person_id, tags=("signed_fail",))
+            tag = "signed_fail"
+
+        if result.person_id in children:
+            self.tree.item(result.person_id, tags=(tag,))
 
         self.progress.configure(value=done)
         self.var_progress_text.set("%d / %d" % (done, self._sign_total))

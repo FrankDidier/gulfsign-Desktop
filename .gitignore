@@ -8,3 +8,4 @@ dist/
 *.egg-info/
 gulfsign_config.json
 .env
+.DS_Store

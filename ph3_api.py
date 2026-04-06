@@ -149,6 +149,24 @@ _STATUS_MAP = {
 }
 _STATUS_REVERSE = {v: k for k, v in _STATUS_MAP.items()}
 
+POPULATION_TYPES = {
+    "0": "所有",
+    "1": "一般人群",
+    "2": "高血压",
+    "3": "糖尿病",
+    "4": "脑卒中",
+    "5": "孕产妇",
+    "6": "0-6岁儿童",
+    "7": "重点监测对象",
+    "8": "严重精神障碍患者",
+    "9": "肺结核",
+    "10": "老年人",
+    "11": "残疾人",
+    "12": "计划生育特殊家庭",
+    "13": "其他疾病",
+    "14": "慢阻肺",
+}
+
 _DEFAULT_QUERY_FORM = {
     "JKDABM": "", "XM": "", "XM_PY": "true", "SFZH": "",
     "ZZDABH": "", "CSRQ_BEGIN": "", "CSRQ_END": "",
@@ -470,19 +488,24 @@ class PH3Client:
                 pass
         return []
 
-    def _load_service_packs(self) -> Tuple[str, str]:
-        """获取服务包列表，返回 (guids逗号分隔, names逗号分隔)。"""
+    def _load_service_packs(self, fwlx: str = "0") -> Tuple[str, str]:
+        """获取服务包列表，返回 (guids逗号分隔, 中文名逗号分隔)。
+
+        fwlx: 人群类型代码 (0=所有, 1=一般人群, 2=高血压, 3=糖尿病, ...)
+        """
         import json as _json
         try:
             resp = self.session.get(
                 self._url("/Sys_JCWS/B0105/Do_B0105_Handler.ashx"),
-                params={"ACTION": "8", "B0110_02": "2", "B0110_07": "0"},
+                params={"ACTION": "8", "B0110_02": "2", "B0110_07": fwlx},
                 timeout=self._timeout,
             )
             data = _json.loads(resp.text)
-            items = data.get("B0110", [])
+            items = data.get("B0110", data) if isinstance(data, dict) else data
+            if isinstance(items, dict):
+                items = items.get("B0110", [])
             guids = ",".join(it["GUID"] for it in items)
-            names = ",".join(it.get("B0110_03", "") for it in items)
+            names = ",".join(it.get("B0110_01", it.get("B0110_03", "")) for it in items)
             return guids, names
         except Exception:
             return "", ""
@@ -513,6 +536,9 @@ class PH3Client:
         signing_date: str = "",
         fwb_list: str = "",
         fwb_mc_list: str = "",
+        agreement_start: str = "",
+        agreement_end: str = "",
+        period: str = "1",
     ) -> SignResult:
         if not self.logged_in:
             return SignResult(False, person_id, error="未登录", step="initiate")
@@ -521,7 +547,12 @@ class PH3Client:
         try:
             ts = str(int(time.time() * 1000))
             today = time.strftime("%Y%m%d")
-            next_year = str(int(today[:4]) + 1) + today[4:]
+            start_date = agreement_start or today
+            if agreement_end:
+                end_date = agreement_end
+            else:
+                yrs = int(period) if period.isdigit() else 1
+                end_date = str(int(start_date[:4]) + yrs) + start_date[4:]
 
             enc_guid = PH3Crypto.crptosEn(person_id + "|" + ts, self.token_en)
             sign = PH3Crypto.crptosTH(enc_guid + self.token_th)
@@ -569,7 +600,7 @@ class PH3Client:
             )
 
             if not fwb_list or not fwb_mc_list:
-                fwb_list, fwb_mc_list = self._load_service_packs()
+                fwb_list, fwb_mc_list = self._load_service_packs(service_type)
 
             form_data.update({
                 "QYLX": "2",
@@ -580,10 +611,10 @@ class PH3Client:
                 "QYYS": doctor_name or self.doctor_name or form_data.get("SBR", ""),
                 "QYRQ": signing_date or today,
                 "FWLX": service_type,
-                "XYKSRQ": today,
-                "QYZQ": "1",
-                "QYZQ_INPUT": "1",
-                "XYJSRQ": next_year,
+                "XYKSRQ": start_date,
+                "QYZQ": period,
+                "QYZQ_INPUT": period,
+                "XYJSRQ": end_date,
                 "YFJE": "0",
                 "BZJE": "0",
                 "ZJJE": "0",
@@ -733,7 +764,7 @@ class PH3Client:
     # ---- 删除签约 ----
 
     def delete_signing(self, contract_code: str) -> bool:
-        """删除一条签约记录（ACTION=3），返回是否成功。"""
+        """删除一条签约记录（ACTION=3），适用于status=5/6。"""
         try:
             resp = self.session.get(
                 self._url("/Sys_JCWS/B0105/Do_B0105_Handler.ashx"),
@@ -742,6 +773,23 @@ class PH3Client:
                     "GUID": contract_code,
                     "etc": str(int(time.time() * 1000)),
                 },
+                timeout=self._timeout,
+            )
+            return '"opType":0' in resp.text or '"opType": 0' in resp.text
+        except Exception:
+            return False
+
+    def void_signing(self, contract_code: str) -> bool:
+        """作废一条已签约的记录（ACTION=11），仅适用于status=0（已签约）。"""
+        try:
+            resp = self.session.get(
+                self._url("/Sys_JCWS/B0105/Do_B0105_Handler.ashx"),
+                params={
+                    "ACTION": "11",
+                    "GUID": contract_code,
+                    "etc": str(int(time.time() * 1000)),
+                },
+                headers=self._csrf_header(),
                 timeout=self._timeout,
             )
             return '"opType":0' in resp.text or '"opType": 0' in resp.text
@@ -760,15 +808,61 @@ class PH3Client:
         delay: float = 0.3,
         contract_status: str = "",
         contract_code: str = "",
+        auto_void: bool = False,
+        auto_delete_doctor: bool = False,
+        auto_delete_resident: bool = False,
+        service_type: str = "0",
+        agreement_start: str = "",
+        agreement_end: str = "",
+        period: str = "1",
     ) -> SignResult:
         """签约一位居民。
 
-        根据当前签约状态自动选择操作：
+        根据当前签约状态和选项自动选择操作：
+        - auto_void: 若已签约(status=0)，先作废再重新签约
+        - auto_delete_doctor: 若医生申请(status=5)，先删除再重新签约
+        - auto_delete_resident: 若居民申请(status=6)，先删除再重新签约
         - status=6 (居民申请): 直接确认 → 已签约
-        - status=1 (未签约) 或无状态: 发起签约 → 医生申请(status=5)
-        - status=5 (医生申请): 已发起，尝试确认（服务端可能拒绝）
+        - status=1 (未签约) 或无状态: 发起签约
+        - status=5 (医生申请): 已发起，尝试确认
         """
         t0 = time.time()
+
+        if contract_status == "0" and contract_code and auto_void:
+            ok = self.void_signing(contract_code)
+            if not ok:
+                return SignResult(
+                    False, person_id, name,
+                    contract_code=contract_code,
+                    error="作废已有签约失败",
+                    step="void", elapsed=time.time() - t0,
+                )
+            contract_status = "1"
+            contract_code = ""
+
+        if contract_status == "5" and contract_code and auto_delete_doctor:
+            ok = self.delete_signing(contract_code)
+            if not ok:
+                return SignResult(
+                    False, person_id, name,
+                    contract_code=contract_code,
+                    error="删除医生申请失败",
+                    step="delete", elapsed=time.time() - t0,
+                )
+            contract_status = "1"
+            contract_code = ""
+
+        if contract_status == "6" and contract_code and auto_delete_resident:
+            ok = self.delete_signing(contract_code)
+            if not ok:
+                return SignResult(
+                    False, person_id, name,
+                    contract_code=contract_code,
+                    error="删除居民申请失败",
+                    step="delete", elapsed=time.time() - t0,
+                )
+            contract_status = "1"
+            contract_code = ""
 
         if contract_status == "6" and contract_code:
             r = self.confirm_signing(person_id, contract_code, name)
@@ -792,6 +886,10 @@ class PH3Client:
             team_name=team_name,
             team_id=team_id,
             doctor_name=doctor_name,
+            service_type=service_type,
+            agreement_start=agreement_start,
+            agreement_end=agreement_end,
+            period=period,
         )
         if not r1.success:
             r1.elapsed = time.time() - t0
@@ -801,17 +899,8 @@ class PH3Client:
         pname = r1.name or name
 
         if not cc:
-            time.sleep(0.5)
-            pts, _ = self.query_patients(status="5")
-            for p in pts:
-                if p.person_id == person_id and p.contract_code:
-                    cc = p.contract_code
-                    break
-
-        if not cc:
             return SignResult(
                 True, person_id, pname,
-                error="",
                 step="initiate", elapsed=time.time() - t0,
             )
 
@@ -827,22 +916,4 @@ class PH3Client:
             contract_code=cc,
             step="initiate",
             elapsed=time.time() - t0,
-        )
-
-    # ---- 对已签约但过期的居民重新签约 ----
-
-    def resign_expired(
-        self,
-        person_id: str,
-        contract_code: str,
-        name: str = "",
-        team_name: str = "",
-        doctor_name: str = "",
-        delay: float = 0.3,
-    ) -> SignResult:
-        """对已过期的签约记录重新发起签约。"""
-        return self.sign_one(
-            person_id, name=name,
-            team_name=team_name, doctor_name=doctor_name,
-            delay=delay,
         )
