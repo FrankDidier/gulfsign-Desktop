@@ -630,17 +630,25 @@ class GulfSignApp(tk.Tk):
 
         guide_text = (
             "OpenID 是微信用户在健康卡小程序中的唯一标识，用于健康卡确认功能。\n"
-            "获取方法：启动下方代理 → 手机设置WiFi代理 → 打开\"我的健康卡\"小程序 → 自动抓取\n"
             "\n"
-            "操作步骤:\n"
+            "【方法一：苹果手机抓取（推荐）】\n"
             "  ① 点击「启动代理」按钮\n"
-            "  ② 在手机上进入 WiFi设置 → 手动代理 → 填写下方显示的 IP 和端口\n"
-            "  ③ 用手机浏览器访问下方「证书地址」，下载并安装CA证书\n"
-            "      ▸ 苹果手机: 下载后 → 设置 → 已下载描述文件 → 安装 → 设置 → 通用 → 关于 → 证书信任设置 → 开启\n"
-            "      ▸ 安卓手机: 下载后 → 设置 → 安全 → 加密与凭据 → 安装证书\n"
-            "  ④ 打开微信 → 搜索小程序\"我的健康卡\" → 进入后自动抓取OpenID\n"
-            "  ⑤ 抓取到的OpenID会显示在下方列表中，点击「使用此OpenID」自动填入健康卡确认页\n"
-            "  ⑥ 完成后点击「停止代理」，手机WiFi代理改回「无」"
+            "  ② 手机进入 WiFi设置 → HTTP代理 → 手动 → 填写下方IP和端口\n"
+            "  ③ 用Safari浏览器访问下方「证书地址」→ 允许下载\n"
+            "  ④ 设置 → 已下载描述文件 → GulfSign CA → 安装\n"
+            "  ⑤ 设置 → 通用 → 关于本机 → 证书信任设置 → 开启GulfSign CA\n"
+            "  ⑥ 打开微信 → 小程序\"我的健康卡\" → OpenID自动抓取\n"
+            "  ⑦ 完成后关闭代理，手机WiFi代理改回「关闭」\n"
+            "\n"
+            "【方法二：安卓手机抓取】\n"
+            "  步骤同上，安装证书时选择: 设置 → 安全 → 加密与凭据 → 安装证书 → CA证书\n"
+            "  ⚠ 注意: 安卓7.0以上微信可能不信任用户证书，建议优先用苹果手机\n"
+            "    如安卓抓不到，可尝试: 安装HttpCanary应用(免费) → 开启抓包 → 打开健康卡\n"
+            "\n"
+            "【方法三：手动输入】\n"
+            "  如已通过其他方式获取OpenID，可直接在下方手动输入框中粘贴\n"
+            "\n"
+            "提示: 抓取到的OpenID点击「使用此OpenID」会自动填入健康卡确认页"
         )
 
         try:
@@ -648,7 +656,7 @@ class GulfSignApp(tk.Tk):
         except Exception:
             bg = "#f0f0f0"
         text_widget = tk.Text(
-            frame, height=11, wrap=tk.WORD, state=tk.NORMAL,
+            frame, height=14, wrap=tk.WORD, state=tk.NORMAL,
             font=("", 10), relief=tk.FLAT, background=bg,
         )
         text_widget.insert("1.0", guide_text)

@@ -85,6 +85,9 @@ class CertManager:
                 x509.NameAttribute(NameOID.COMMON_NAME, "GulfSign CA"),
             ])
             now = datetime.datetime.utcnow()
+            ca_ski = x509.SubjectKeyIdentifier.from_public_key(
+                self._ca_key.public_key()
+            )
             self._ca_cert = (
                 x509.CertificateBuilder()
                 .subject_name(subject)
@@ -102,6 +105,7 @@ class CertManager:
                         encipher_only=False, decipher_only=False,
                     ), True,
                 )
+                .add_extension(ca_ski, False)
                 .sign(self._ca_key, hashes.SHA256())
             )
 
@@ -137,6 +141,13 @@ class CertManager:
             key = rsa.generate_private_key(65537, 2048)
             now = datetime.datetime.utcnow()
 
+            aki = x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                self._ca_cert.extensions.get_extension_for_class(
+                    x509.SubjectKeyIdentifier
+                ).value
+            )
+            ski = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
+
             cert = (
                 x509.CertificateBuilder()
                 .subject_name(x509.Name([
@@ -151,6 +162,8 @@ class CertManager:
                     x509.SubjectAlternativeName([x509.DNSName(hostname)]),
                     False,
                 )
+                .add_extension(aki, False)
+                .add_extension(ski, False)
                 .sign(self._ca_key, hashes.SHA256())
             )
 
@@ -329,23 +342,39 @@ class OpenIDProxy:
 
     def _serve_cert_if_requested(self, client_sock, parsed, raw_data) -> bool:
         """Serve CA certificate when phone visits http://proxy_ip:port/cert"""
-        raw_path = raw_data.split(b" ")[1] if b" " in raw_data else b""
+        raw_url = raw_data.split(b" ")[1] if b" " in raw_data else b""
+        is_proxied = raw_url.startswith(b"http://") or raw_url.startswith(b"https://")
 
-        is_cert_request = False
-        if parsed.path and parsed.path.rstrip("/") in ("/cert", "/ca", "/certificate"):
-            is_cert_request = True
-        if raw_path.rstrip(b"/") in (b"/cert", b"/ca", b"/certificate"):
-            is_cert_request = True
+        if is_proxied and parsed.hostname:
+            local_ip = get_local_ip()
+            if parsed.hostname not in ("127.0.0.1", "localhost", local_ip):
+                return False
 
-        if not is_cert_request:
+        path_clean = (parsed.path or "").rstrip("/")
+
+        is_cert_request = path_clean in ("/cert", "/ca", "/certificate")
+        is_page_request = path_clean in ("", "/") and not is_proxied
+
+        if not is_cert_request and not is_page_request:
             return False
 
         ca_path = self.cert_mgr.ca_cert_path
         if not os.path.exists(ca_path):
-            body = b"<html><body><h1>CA cert not generated yet. Please retry.</h1></body></html>"
+            body = b"<html><body><h1>CA cert not generated yet.</h1></body></html>"
             header = (
                 b"HTTP/1.1 500 Internal Server Error\r\n"
-                b"Content-Type: text/html\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
+                b"Content-Length: %d\r\n"
+                b"Connection: close\r\n\r\n" % len(body)
+            )
+            client_sock.sendall(header + body)
+            return True
+
+        if is_page_request and not is_cert_request:
+            body = self._cert_landing_page().encode("utf-8")
+            header = (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
                 b"Content-Length: %d\r\n"
                 b"Connection: close\r\n\r\n" % len(body)
             )
@@ -355,16 +384,59 @@ class OpenIDProxy:
         with open(ca_path, "rb") as f:
             cert_data = f.read()
 
+        from cryptography.hazmat.primitives.serialization import Encoding
+        from cryptography import x509 as x509_mod
+        cert_obj = x509_mod.load_pem_x509_certificate(cert_data)
+        der_data = cert_obj.public_bytes(Encoding.DER)
+
         header = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: application/x-x509-ca-cert\r\n"
-            b"Content-Disposition: attachment; filename=\"GulfSign_CA.pem\"\r\n"
+            b"Content-Disposition: attachment; filename=\"GulfSign_CA.crt\"\r\n"
             b"Content-Length: %d\r\n"
-            b"Connection: close\r\n\r\n" % len(cert_data)
+            b"Connection: close\r\n\r\n" % len(der_data)
         )
-        client_sock.sendall(header + cert_data)
-        self._log("CA证书已发送到手机", "ok")
+        client_sock.sendall(header + der_data)
+        self._log("CA证书已发送到手机 (.crt格式)", "ok")
         return True
+
+    def _cert_landing_page(self) -> str:
+        return """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GulfSign CA 证书安装</title>
+<style>
+body{font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f5f5f5}
+h1{color:#333;font-size:22px}
+.btn{display:block;text-align:center;padding:16px;background:#1677ff;color:#fff;
+     border-radius:8px;text-decoration:none;font-size:18px;margin:20px 0}
+.btn:active{background:#0958d9}
+.steps{background:#fff;border-radius:8px;padding:16px;margin:16px 0}
+.steps h3{margin:0 0 8px;color:#1677ff}
+.steps p{margin:4px 0;color:#555;line-height:1.6}
+.warn{background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:12px;margin:16px 0;color:#ad6800}
+</style></head><body>
+<h1>GulfSign 证书安装助手</h1>
+<a class="btn" href="/cert">点击下载 CA 证书</a>
+<div class="steps"><h3>安卓手机安装步骤</h3>
+<p>1. 点击上方按钮下载证书</p>
+<p>2. 打开 <b>设置 → 安全 → 更多安全设置 → 加密与凭据 → 安装证书</b></p>
+<p>3. 选择 <b>CA 证书</b></p>
+<p>4. 找到下载的 GulfSign_CA.crt 文件并安装</p>
+<p>5. 确认安装（可能需要输入锁屏密码）</p>
+</div>
+<div class="steps"><h3>苹果手机安装步骤</h3>
+<p>1. 点击上方按钮下载证书</p>
+<p>2. 弹出提示后点击 <b>允许</b></p>
+<p>3. 打开 <b>设置 → 已下载描述文件 → GulfSign CA → 安装</b></p>
+<p>4. 打开 <b>设置 → 通用 → 关于本机 → 证书信任设置</b></p>
+<p>5. 开启 GulfSign CA 的完全信任</p>
+</div>
+<div class="warn">
+<b>重要提示：</b>证书仅用于获取OpenID，使用完毕后请删除证书并关闭WiFi代理。
+</div>
+</body></html>"""
 
     def _handle_connect(self, client_sock, first_line, data):
         parts = first_line.split()
