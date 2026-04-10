@@ -20,8 +20,9 @@ if getattr(sys, "frozen", False):
 
 from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
+from proxy_capture import OpenIDProxy, get_local_ip
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
 CONFIG_FILE = "gulfsign_config.json"
 
@@ -77,6 +78,9 @@ class GulfSignApp(tk.Tk):
         self._hc_cards: List[HealthCard] = []
         self._hc_selected: set = set()
 
+        self._proxy: Optional[OpenIDProxy] = None
+        self._proxy_running = False
+
         self._cfg = load_config()
 
         self._build_ui()
@@ -113,12 +117,15 @@ class GulfSignApp(tk.Tk):
 
         tab1 = ttk.Frame(self.notebook, padding=4)
         tab2 = ttk.Frame(self.notebook, padding=4)
+        tab3 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
+        self.notebook.add(tab3, text=" 获取OpenID ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
+        self._build_openid_tab(tab3)
 
     # ================================================================
     # Tab 1: 3.0系统签约
@@ -606,6 +613,331 @@ class GulfSignApp(tk.Tk):
         ttk.Button(
             btn_frame, text="清空日志", command=self._clear_hc_log
         ).pack(side=tk.RIGHT)
+
+    # ================================================================
+    # Tab 3: 获取OpenID
+    # ================================================================
+
+    def _build_openid_tab(self, parent):
+        self._build_openid_guide(parent)
+        self._build_openid_proxy(parent)
+        self._build_openid_results(parent)
+        self._build_openid_log(parent)
+
+    def _build_openid_guide(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 使用说明 ", padding=8)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        guide_text = (
+            "OpenID 是微信用户在健康卡小程序中的唯一标识，用于健康卡确认功能。\n"
+            "获取方法：启动下方代理 → 手机设置WiFi代理 → 打开\"我的健康卡\"小程序 → 自动抓取\n"
+            "\n"
+            "操作步骤:\n"
+            "  ① 点击「启动代理」按钮\n"
+            "  ② 在手机上进入 WiFi设置 → 手动代理 → 填写下方显示的 IP 和端口\n"
+            "  ③ 用手机浏览器访问下方「证书地址」，下载并安装CA证书\n"
+            "      ▸ 苹果手机: 下载后 → 设置 → 已下载描述文件 → 安装 → 设置 → 通用 → 关于 → 证书信任设置 → 开启\n"
+            "      ▸ 安卓手机: 下载后 → 设置 → 安全 → 加密与凭据 → 安装证书\n"
+            "  ④ 打开微信 → 搜索小程序\"我的健康卡\" → 进入后自动抓取OpenID\n"
+            "  ⑤ 抓取到的OpenID会显示在下方列表中，点击「使用此OpenID」自动填入健康卡确认页\n"
+            "  ⑥ 完成后点击「停止代理」，手机WiFi代理改回「无」"
+        )
+
+        try:
+            bg = self.cget("background")
+        except Exception:
+            bg = "#f0f0f0"
+        text_widget = tk.Text(
+            frame, height=11, wrap=tk.WORD, state=tk.NORMAL,
+            font=("", 10), relief=tk.FLAT, background=bg,
+        )
+        text_widget.insert("1.0", guide_text)
+        text_widget.configure(state=tk.DISABLED)
+        text_widget.pack(fill=tk.X)
+
+    def _build_openid_proxy(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 代理设置 ", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        r0 = ttk.Frame(frame)
+        r0.pack(fill=tk.X)
+
+        self.btn_proxy_start = ttk.Button(
+            r0, text="▶ 启动代理", command=self._on_proxy_start
+        )
+        self.btn_proxy_start.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.btn_proxy_stop = ttk.Button(
+            r0, text="⏹ 停止代理", command=self._on_proxy_stop, state=tk.DISABLED
+        )
+        self.btn_proxy_stop.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(r0, text="端口:").pack(side=tk.LEFT)
+        self.var_proxy_port = tk.StringVar(value="8888")
+        ttk.Entry(r0, textvariable=self.var_proxy_port, width=6).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+
+        self.var_proxy_status = tk.StringVar(value="代理未启动")
+        self.lbl_proxy_status = ttk.Label(
+            r0, textvariable=self.var_proxy_status, style="Info.TLabel"
+        )
+        self.lbl_proxy_status.pack(side=tk.LEFT)
+
+        r1 = ttk.Frame(frame)
+        r1.pack(fill=tk.X, pady=(6, 0))
+
+        local_ip = get_local_ip()
+        ttk.Label(r1, text="手机代理设置:", font=("", 10, "bold")).pack(side=tk.LEFT)
+
+        self.var_proxy_ip = tk.StringVar(value=local_ip)
+        ttk.Label(r1, text="  IP地址:").pack(side=tk.LEFT)
+        ip_entry = ttk.Entry(r1, textvariable=self.var_proxy_ip, width=16, state="readonly")
+        ip_entry.pack(side=tk.LEFT, padx=(4, 8))
+
+        ttk.Label(r1, text="端口:").pack(side=tk.LEFT)
+        port_lbl = ttk.Entry(r1, textvariable=self.var_proxy_port, width=6, state="readonly")
+        port_lbl.pack(side=tk.LEFT, padx=(4, 8))
+
+        btn_copy_ip = ttk.Button(
+            r1, text="复制代理信息",
+            command=lambda: self._copy_to_clipboard(
+                "%s:%s" % (self.var_proxy_ip.get(), self.var_proxy_port.get())
+            ),
+        )
+        btn_copy_ip.pack(side=tk.LEFT, padx=(8, 0))
+
+        r2 = ttk.Frame(frame)
+        r2.pack(fill=tk.X, pady=(4, 0))
+
+        ttk.Label(r2, text="证书地址:").pack(side=tk.LEFT)
+        self.var_cert_url = tk.StringVar(value="(启动代理后显示)")
+        ttk.Entry(r2, textvariable=self.var_cert_url, width=48, state="readonly").pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        self.btn_copy_cert = ttk.Button(
+            r2, text="复制证书地址",
+            command=lambda: self._copy_to_clipboard(self.var_cert_url.get()),
+        )
+        self.btn_copy_cert.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_open_cert_dir = ttk.Button(
+            r2, text="打开证书目录", command=self._open_cert_dir,
+        )
+        self.btn_open_cert_dir.pack(side=tk.LEFT)
+
+    def _build_openid_results(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 已抓取的OpenID ", padding=6)
+        frame.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        self.openid_listbox = tk.Listbox(
+            frame, height=5,
+            font=("Consolas", 11) if sys.platform == "win32" else ("Menlo", 11),
+            selectmode=tk.SINGLE,
+        )
+        self.openid_listbox.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+
+        sb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.openid_listbox.yview)
+        self.openid_listbox.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.btn_use_openid = ttk.Button(
+            btn_frame, text="★ 使用选中的OpenID（自动填入健康卡确认页）",
+            command=self._on_use_openid,
+        )
+        self.btn_use_openid.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(
+            btn_frame, text="复制选中OpenID",
+            command=self._on_copy_openid,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Label(
+            btn_frame,
+            text="提示: 可手动输入OpenID到下方输入框",
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+
+        manual_frame = ttk.Frame(parent)
+        manual_frame.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(manual_frame, text="手动输入OpenID:").pack(side=tk.LEFT)
+        self.var_manual_openid = tk.StringVar()
+        ttk.Entry(manual_frame, textvariable=self.var_manual_openid, width=40).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+        ttk.Button(
+            manual_frame, text="使用此OpenID",
+            command=self._on_use_manual_openid,
+        ).pack(side=tk.LEFT)
+
+    def _build_openid_log(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 代理日志 ", padding=4)
+        frame.pack(fill=tk.BOTH, expand=False, pady=(0, 0))
+        frame.configure(height=100)
+
+        log_frame = ttk.Frame(frame)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.proxy_log_text = tk.Text(
+            log_frame, height=5, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
+        )
+        log_sb = ttk.Scrollbar(log_frame, command=self.proxy_log_text.yview)
+        self.proxy_log_text.configure(yscrollcommand=log_sb.set)
+        self.proxy_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.proxy_log_text.tag_configure("ok", foreground="#16a34a")
+        self.proxy_log_text.tag_configure("err", foreground="#dc2626")
+        self.proxy_log_text.tag_configure("info", foreground="#2563eb")
+        self.proxy_log_text.tag_configure("warn", foreground="#d97706")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(
+            btn_frame, text="清空日志", command=self._clear_proxy_log
+        ).pack(side=tk.RIGHT)
+
+    # -- Tab 3: Proxy Logic --
+
+    def _proxy_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.proxy_log_text.configure(state=tk.NORMAL)
+            self.proxy_log_text.insert(tk.END, line, tag)
+            self.proxy_log_text.see(tk.END)
+            self.proxy_log_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _clear_proxy_log(self):
+        self.proxy_log_text.configure(state=tk.NORMAL)
+        self.proxy_log_text.delete("1.0", tk.END)
+        self.proxy_log_text.configure(state=tk.DISABLED)
+
+    def _on_proxy_start(self):
+        if self._proxy_running:
+            return
+
+        try:
+            port = int(self.var_proxy_port.get())
+        except ValueError:
+            messagebox.showwarning("提示", "请输入有效的端口号")
+            return
+
+        self._proxy_log("正在启动代理服务器...", "info")
+
+        def on_openid_found(openid):
+            self.after(0, lambda oid=openid: self._on_openid_captured(oid))
+
+        def on_proxy_log(msg, tag=""):
+            self._proxy_log(msg, tag)
+
+        self._proxy = OpenIDProxy(
+            port=port,
+            on_openid=on_openid_found,
+            on_log=on_proxy_log,
+        )
+
+        if self._proxy.start():
+            self._proxy_running = True
+            self.btn_proxy_start.configure(state=tk.DISABLED)
+            self.btn_proxy_stop.configure(state=tk.NORMAL)
+            self.var_proxy_status.set("代理运行中")
+            self.lbl_proxy_status.configure(style="Success.TLabel")
+
+            ip = get_local_ip()
+            self.var_proxy_ip.set(ip)
+            cert_url = "http://%s:%d/cert" % (ip, port)
+            self.var_cert_url.set(cert_url)
+
+            self._proxy_log(
+                "手机WiFi代理设置: 服务器=%s  端口=%d" % (ip, port), "info"
+            )
+            self._proxy_log(
+                "请用手机浏览器访问 %s 下载CA证书" % cert_url, "info"
+            )
+        else:
+            self.var_proxy_status.set("启动失败")
+            self.lbl_proxy_status.configure(style="Error.TLabel")
+
+    def _on_proxy_stop(self):
+        if self._proxy:
+            self._proxy.stop()
+        self._proxy_running = False
+        self.btn_proxy_start.configure(state=tk.NORMAL)
+        self.btn_proxy_stop.configure(state=tk.DISABLED)
+        self.var_proxy_status.set("代理已停止")
+        self.lbl_proxy_status.configure(style="Info.TLabel")
+
+    def _on_openid_captured(self, openid: str):
+        items = self.openid_listbox.get(0, tk.END)
+        if openid not in items:
+            self.openid_listbox.insert(tk.END, openid)
+            self._proxy_log("已捕获 OpenID: %s" % openid, "ok")
+
+    def _on_use_openid(self):
+        sel = self.openid_listbox.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表中选择一个OpenID")
+            return
+        openid = self.openid_listbox.get(sel[0])
+        self._apply_openid(openid)
+
+    def _on_copy_openid(self):
+        sel = self.openid_listbox.curselection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表中选择一个OpenID")
+            return
+        openid = self.openid_listbox.get(sel[0])
+        self._copy_to_clipboard(openid)
+        self._proxy_log("已复制 OpenID: %s" % openid, "ok")
+
+    def _on_use_manual_openid(self):
+        openid = self.var_manual_openid.get().strip()
+        if not openid:
+            messagebox.showwarning("提示", "请输入OpenID")
+            return
+        self._apply_openid(openid)
+
+    def _apply_openid(self, openid: str):
+        self.var_hc_openid.set(openid)
+        self.notebook.select(1)
+        self._proxy_log("已将 OpenID 填入健康卡确认页: %s" % openid, "ok")
+        self._save_current_config()
+
+    def _copy_to_clipboard(self, text: str):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+
+    def _open_cert_dir(self):
+        if self._proxy:
+            cert_dir = self._proxy.cert_mgr.cert_dir
+        else:
+            cert_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "certs"
+            )
+        if os.path.exists(cert_dir):
+            if sys.platform == "win32":
+                os.startfile(cert_dir)
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", cert_dir])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", cert_dir])
+        else:
+            messagebox.showinfo("提示", "请先启动代理以生成CA证书")
 
     # ================================================================
     # Config
@@ -1378,6 +1710,8 @@ class GulfSignApp(tk.Tk):
             self._stop_event.set()
             self._hc_stop.set()
             self._paused = False
+        if self._proxy and self._proxy_running:
+            self._proxy.stop()
         self._save_current_config()
         self.destroy()
 
