@@ -395,11 +395,12 @@ class OpenIDProxy:
         self._server_socket = None
         self._thread = None
         self._found_openids: Set[str] = set()
+        self._traffic_log_lock = threading.Lock()
 
-        cert_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "certs"
-        )
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        cert_dir = os.path.join(base_dir, "certs")
         self.cert_mgr = CertManager(cert_dir)
+        self.traffic_log_path = os.path.join(base_dir, "traffic_log.txt")
 
     @property
     def ca_cert_path(self):
@@ -420,6 +421,21 @@ class OpenIDProxy:
             if self.on_openid:
                 self.on_openid(openid)
 
+    def _log_traffic(self, hostname: str, direction: str, data: bytes):
+        """Write full request/response to traffic_log.txt for analysis."""
+        try:
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            text = data.decode("utf-8", errors="replace")[:8000]
+            with self._traffic_log_lock:
+                with open(self.traffic_log_path, "a", encoding="utf-8") as f:
+                    f.write("\n" + "=" * 70 + "\n")
+                    f.write("[%s] %s  %s\n" % (ts, direction, hostname))
+                    f.write("-" * 70 + "\n")
+                    f.write(text + "\n")
+        except Exception:
+            pass
+
     def start(self) -> bool:
         if self._running:
             return True
@@ -427,6 +443,12 @@ class OpenIDProxy:
         if not self.cert_mgr.ensure_ca():
             self._log("CA证书生成失败，请确认已安装 cryptography 库", "err")
             return False
+
+        if os.path.exists(self.traffic_log_path):
+            try:
+                os.remove(self.traffic_log_path)
+            except Exception:
+                pass
 
         try:
             self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -455,6 +477,10 @@ class OpenIDProxy:
                 pass
         if self._thread:
             self._thread.join(timeout=3)
+        if os.path.exists(self.traffic_log_path):
+            sz = os.path.getsize(self.traffic_log_path)
+            if sz > 0:
+                self._log("完整流量日志已保存: traffic_log.txt (%d bytes)" % sz, "ok")
         self._log("代理已停止", "info")
 
     def _accept_loop(self):
@@ -689,6 +715,10 @@ h1{color:#333;font-size:22px}
                 return
 
             self._scan_for_openid(request_data)
+            self._log_traffic(hostname, ">>> REQUEST", request_data)
+
+            req_line = request_data.split(b"\r\n")[0].decode("utf-8", errors="replace")
+            self._log("拦截 [%s] %s" % (hostname, req_line[:80]), "info")
 
             remote_ctx = ssl.create_default_context()
             remote_ctx.check_hostname = False
@@ -711,6 +741,8 @@ h1{color:#333;font-size:22px}
                     break
 
             self._scan_for_openid(response)
+            if response:
+                self._log_traffic(hostname, "<<< RESPONSE", response)
             remote_ssl.close()
         except Exception as e:
             logger.debug("MITM error for %s: %s", hostname, e)
