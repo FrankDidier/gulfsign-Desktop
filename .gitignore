@@ -9,3 +9,4 @@ dist/
 gulfsign_config.json
 .env
 .DS_Store
+certs/
