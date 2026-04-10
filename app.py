@@ -20,7 +20,11 @@ if getattr(sys, "frozen", False):
 
 from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
-from proxy_capture import OpenIDProxy, get_local_ip
+from proxy_capture import (
+    OpenIDProxy, get_local_ip,
+    set_windows_proxy, clear_windows_proxy,
+    install_ca_to_windows, remove_ca_from_windows,
+)
 
 VERSION = "2.1.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
@@ -655,24 +659,18 @@ class GulfSignApp(tk.Tk):
         guide_text = (
             "OpenID 是微信用户在健康卡小程序中的唯一标识，用于健康卡确认功能。\n"
             "\n"
-            "【方法一：苹果手机抓取（推荐）】\n"
-            "  ① 点击「启动代理」按钮\n"
-            "  ② 手机进入 WiFi设置 → HTTP代理 → 手动 → 填写下方IP和端口\n"
-            "  ③ 用Safari浏览器访问下方「证书地址」→ 允许下载\n"
-            "  ④ 设置 → 已下载描述文件 → GulfSign CA → 安装\n"
-            "  ⑤ 设置 → 通用 → 关于本机 → 证书信任设置 → 开启GulfSign CA\n"
-            "  ⑥ 打开微信 → 小程序\"我的健康卡\" → OpenID自动抓取\n"
-            "  ⑦ 完成后关闭代理，手机WiFi代理改回「关闭」\n"
+            "【方法一：电脑版微信抓取（推荐，最简单）】\n"
+            "  ① 点击「启动代理」→ 点击「一键设置电脑代理+证书」\n"
+            "  ② 打开电脑版微信 → 搜索小程序\"我的健康卡\" → 进入\n"
+            "  ③ OpenID自动抓取到下方列表 → 点击「使用此OpenID」\n"
+            "  ④ 完成后点击「一键清除电脑代理」\n"
             "\n"
-            "【方法二：安卓手机抓取】\n"
-            "  步骤同上，安装证书时选择: 设置 → 安全 → 加密与凭据 → 安装证书 → CA证书\n"
-            "  ⚠ 注意: 安卓7.0以上微信可能不信任用户证书，建议优先用苹果手机\n"
-            "    如安卓抓不到，可尝试: 安装HttpCanary应用(免费) → 开启抓包 → 打开健康卡\n"
+            "【方法二：苹果手机抓取】\n"
+            "  启动代理 → 手机WiFi设置代理(IP+端口) → Safari下载证书 → 安装并信任\n"
+            "  → 打开微信\"我的健康卡\" → 自动抓取 → 完成后关闭代理\n"
             "\n"
             "【方法三：手动输入】\n"
-            "  如已通过其他方式获取OpenID，可直接在下方手动输入框中粘贴\n"
-            "\n"
-            "提示: 抓取到的OpenID点击「使用此OpenID」会自动填入健康卡确认页"
+            "  如已通过其他方式获取OpenID，可直接在下方手动输入框中粘贴"
         )
 
         try:
@@ -680,7 +678,7 @@ class GulfSignApp(tk.Tk):
         except Exception:
             bg = "#f0f0f0"
         text_widget = tk.Text(
-            frame, height=14, wrap=tk.WORD, state=tk.NORMAL,
+            frame, height=10, wrap=tk.WORD, state=tk.NORMAL,
             font=("", 10), relief=tk.FLAT, background=bg,
         )
         text_widget.insert("1.0", guide_text)
@@ -757,6 +755,26 @@ class GulfSignApp(tk.Tk):
             r2, text="打开证书目录", command=self._open_cert_dir,
         )
         self.btn_open_cert_dir.pack(side=tk.LEFT)
+
+        r3 = ttk.Frame(frame)
+        r3.pack(fill=tk.X, pady=(6, 0))
+
+        ttk.Label(r3, text="电脑版微信:", font=("", 10, "bold")).pack(side=tk.LEFT)
+
+        self.btn_pc_setup = ttk.Button(
+            r3, text="一键设置电脑代理+证书", command=self._on_pc_setup,
+        )
+        self.btn_pc_setup.pack(side=tk.LEFT, padx=(8, 4))
+
+        self.btn_pc_clear = ttk.Button(
+            r3, text="一键清除电脑代理", command=self._on_pc_clear,
+        )
+        self.btn_pc_clear.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.var_pc_status = tk.StringVar(value="")
+        ttk.Label(r3, textvariable=self.var_pc_status, foreground="gray").pack(
+            side=tk.LEFT
+        )
 
     def _build_openid_results(self, parent):
         frame = ttk.LabelFrame(parent, text=" 已抓取的OpenID ", padding=6)
@@ -903,6 +921,9 @@ class GulfSignApp(tk.Tk):
             self.lbl_proxy_status.configure(style="Error.TLabel")
 
     def _on_proxy_stop(self):
+        if sys.platform == "win32":
+            clear_windows_proxy()
+            self.var_pc_status.set("")
         if self._proxy:
             self._proxy.stop()
         self._proxy_running = False
@@ -970,6 +991,57 @@ class GulfSignApp(tk.Tk):
                 subprocess.Popen(["xdg-open", cert_dir])
         else:
             messagebox.showinfo("提示", "请先启动代理以生成CA证书")
+
+    def _on_pc_setup(self):
+        if not self._proxy_running:
+            self._proxy_log("请先点击「启动代理」", "warn")
+            messagebox.showwarning("提示", "请先启动代理服务器")
+            return
+
+        if sys.platform != "win32":
+            self._proxy_log("电脑代理功能仅支持Windows系统", "warn")
+            messagebox.showinfo("提示",
+                "此功能仅支持Windows系统。\nmacOS/Linux请手动设置系统代理为 127.0.0.1:%s"
+                % self.var_proxy_port.get()
+            )
+            return
+
+        self._proxy_log("正在设置电脑代理和安装证书...", "info")
+        self.var_pc_status.set("设置中...")
+
+        ca_path = self._proxy.ca_cert_path
+
+        cert_ok = install_ca_to_windows(ca_path)
+        if cert_ok:
+            self._proxy_log("CA证书已安装到Windows信任存储", "ok")
+        else:
+            self._proxy_log("CA证书安装失败（可能需要确认弹窗）", "warn")
+
+        port = int(self.var_proxy_port.get())
+        proxy_ok = set_windows_proxy("127.0.0.1", port)
+        if proxy_ok:
+            self._proxy_log("Windows系统代理已设置: 127.0.0.1:%d" % port, "ok")
+        else:
+            self._proxy_log("系统代理设置失败", "err")
+
+        if proxy_ok:
+            self.var_pc_status.set("电脑代理已开启 — 现在打开微信小程序\"我的健康卡\"")
+            self._proxy_log("请打开电脑版微信 → 搜索小程序\"我的健康卡\" → 进入即可抓取", "info")
+        else:
+            self.var_pc_status.set("设置失败")
+
+    def _on_pc_clear(self):
+        if sys.platform != "win32":
+            messagebox.showinfo("提示", "此功能仅支持Windows系统")
+            return
+
+        ok = clear_windows_proxy()
+        if ok:
+            self._proxy_log("Windows系统代理已清除", "ok")
+            self.var_pc_status.set("电脑代理已关闭")
+        else:
+            self._proxy_log("清除系统代理失败", "err")
+            self.var_pc_status.set("")
 
     # ================================================================
     # Config
@@ -1743,6 +1815,8 @@ class GulfSignApp(tk.Tk):
             self._hc_stop.set()
             self._paused = False
         if self._proxy and self._proxy_running:
+            if sys.platform == "win32":
+                clear_windows_proxy()
             self._proxy.stop()
         self._save_current_config()
         self.destroy()

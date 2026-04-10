@@ -12,6 +12,7 @@ OpenID 抓包代理 — 内置 MITM 代理，自动提取健康卡 OpenID
 import os
 import re
 import ssl
+import sys
 import socket
 import select
 import threading
@@ -48,6 +49,103 @@ def get_local_ip() -> str:
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+def set_windows_proxy(host: str, port: int) -> bool:
+    """Set Windows system proxy (IE/WinHTTP) and return True on success."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import subprocess
+        proxy_str = "%s:%d" % (host, port)
+        subprocess.run([
+            "reg", "add",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxy_str, "/f",
+        ], check=True, capture_output=True)
+        subprocess.run([
+            "reg", "add",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f",
+        ], check=True, capture_output=True)
+        _refresh_proxy_settings()
+        return True
+    except Exception:
+        return False
+
+
+def clear_windows_proxy() -> bool:
+    """Remove Windows system proxy setting."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import subprocess
+        subprocess.run([
+            "reg", "add",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+            "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f",
+        ], check=True, capture_output=True)
+        _refresh_proxy_settings()
+        return True
+    except Exception:
+        return False
+
+
+def _refresh_proxy_settings():
+    """Notify Windows that proxy settings changed (so apps pick it up)."""
+    try:
+        import ctypes
+        import ctypes.wintypes
+        INTERNET_OPTION_REFRESH = 37
+        INTERNET_OPTION_SETTINGS_CHANGED = 39
+        wininet = ctypes.windll.wininet
+        wininet.InternetSetOptionW(None, INTERNET_OPTION_SETTINGS_CHANGED, None, 0)
+        wininet.InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0)
+    except Exception:
+        pass
+
+
+def install_ca_to_windows(ca_cert_path: str) -> bool:
+    """Install CA certificate into the Windows user trust store."""
+    if sys.platform != "win32":
+        return False
+    if not os.path.exists(ca_cert_path):
+        return False
+    try:
+        import subprocess
+        from cryptography.hazmat.primitives.serialization import Encoding
+        from cryptography import x509 as x509_mod
+
+        with open(ca_cert_path, "rb") as f:
+            cert_data = f.read()
+
+        cert_obj = x509_mod.load_pem_x509_certificate(cert_data)
+        der_path = ca_cert_path.replace(".pem", ".crt")
+        with open(der_path, "wb") as f:
+            f.write(cert_obj.public_bytes(Encoding.DER))
+
+        result = subprocess.run(
+            ["certutil", "-addstore", "-user", "Root", der_path],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def remove_ca_from_windows() -> bool:
+    """Remove the GulfSign CA from the Windows user trust store."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["certutil", "-delstore", "-user", "Root", "GulfSign CA"],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 class CertManager:
