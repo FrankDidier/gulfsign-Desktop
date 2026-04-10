@@ -24,6 +24,7 @@ from proxy_capture import (
     OpenIDProxy, get_local_ip,
     set_windows_proxy, clear_windows_proxy,
     install_ca_to_windows, remove_ca_from_windows,
+    set_system_proxy, clear_system_proxy, install_ca_to_system,
 )
 
 VERSION = "2.1.0"
@@ -659,17 +660,17 @@ class GulfSignApp(tk.Tk):
         guide_text = (
             "OpenID 是微信用户在健康卡小程序中的唯一标识，用于健康卡确认功能。\n"
             "\n"
-            "【方法一：电脑版微信抓取（推荐，最简单）】\n"
-            "  ① 点击「启动代理」→ 点击「一键设置电脑代理+证书」\n"
+            "【电脑版微信一键抓取（推荐，最简单）】\n"
+            "  ① 点击「启动代理」→ 系统自动安装证书并设置代理\n"
             "  ② 打开电脑版微信 → 搜索小程序\"我的健康卡\" → 进入\n"
             "  ③ OpenID自动抓取到下方列表 → 点击「使用此OpenID」\n"
-            "  ④ 完成后点击「一键清除电脑代理」\n"
+            "  ④ 完成后点击「停止代理」→ 系统自动清除代理设置\n"
             "\n"
-            "【方法二：苹果手机抓取】\n"
-            "  启动代理 → 手机WiFi设置代理(IP+端口) → Safari下载证书 → 安装并信任\n"
-            "  → 打开微信\"我的健康卡\" → 自动抓取 → 完成后关闭代理\n"
+            "【手机抓取（备用）】\n"
+            "  启动代理 → 手机WiFi设置代理(IP+端口) → 浏览器下载证书 → 安装并信任\n"
+            "  → 打开微信\"我的健康卡\" → 自动抓取 → 完成后停止代理\n"
             "\n"
-            "【方法三：手动输入】\n"
+            "【手动输入】\n"
             "  如已通过其他方式获取OpenID，可直接在下方手动输入框中粘贴"
         )
 
@@ -916,14 +917,35 @@ class GulfSignApp(tk.Tk):
             self._proxy_log(
                 "请用手机浏览器访问 %s 下载CA证书" % cert_url, "info"
             )
+
+            self._auto_setup_local_proxy(port)
         else:
             self.var_proxy_status.set("启动失败")
             self.lbl_proxy_status.configure(style="Error.TLabel")
 
+    def _auto_setup_local_proxy(self, port: int):
+        """Auto-install CA cert and set system proxy after proxy starts."""
+        ca_path = self._proxy.ca_cert_path
+
+        cert_ok = install_ca_to_system(ca_path)
+        if cert_ok:
+            self._proxy_log("CA证书已安装到系统信任存储", "ok")
+        else:
+            self._proxy_log("CA证书自动安装失败，请手动安装或点击「一键设置电脑代理+证书」", "warn")
+
+        proxy_ok = set_system_proxy("127.0.0.1", port)
+        if proxy_ok:
+            self._proxy_log("系统代理已自动设置: 127.0.0.1:%d" % port, "ok")
+            self.var_pc_status.set("代理已开启 — 现在打开微信小程序\"我的健康卡\"")
+            self._proxy_log("请打开电脑版微信 → 搜索小程序\"我的健康卡\" → 进入即可抓取", "info")
+        else:
+            self._proxy_log("系统代理自动设置失败，请手动设置或点击「一键设置电脑代理+证书」", "warn")
+
     def _on_proxy_stop(self):
-        if sys.platform == "win32":
-            clear_windows_proxy()
-            self.var_pc_status.set("")
+        ok = clear_system_proxy()
+        if ok:
+            self._proxy_log("系统代理已清除", "ok")
+        self.var_pc_status.set("")
         if self._proxy:
             self._proxy.stop()
         self._proxy_running = False
@@ -998,29 +1020,21 @@ class GulfSignApp(tk.Tk):
             messagebox.showwarning("提示", "请先启动代理服务器")
             return
 
-        if sys.platform != "win32":
-            self._proxy_log("电脑代理功能仅支持Windows系统", "warn")
-            messagebox.showinfo("提示",
-                "此功能仅支持Windows系统。\nmacOS/Linux请手动设置系统代理为 127.0.0.1:%s"
-                % self.var_proxy_port.get()
-            )
-            return
-
         self._proxy_log("正在设置电脑代理和安装证书...", "info")
         self.var_pc_status.set("设置中...")
 
         ca_path = self._proxy.ca_cert_path
 
-        cert_ok = install_ca_to_windows(ca_path)
+        cert_ok = install_ca_to_system(ca_path)
         if cert_ok:
-            self._proxy_log("CA证书已安装到Windows信任存储", "ok")
+            self._proxy_log("CA证书已安装到系统信任存储", "ok")
         else:
             self._proxy_log("CA证书安装失败（可能需要确认弹窗）", "warn")
 
         port = int(self.var_proxy_port.get())
-        proxy_ok = set_windows_proxy("127.0.0.1", port)
+        proxy_ok = set_system_proxy("127.0.0.1", port)
         if proxy_ok:
-            self._proxy_log("Windows系统代理已设置: 127.0.0.1:%d" % port, "ok")
+            self._proxy_log("系统代理已设置: 127.0.0.1:%d" % port, "ok")
         else:
             self._proxy_log("系统代理设置失败", "err")
 
@@ -1031,13 +1045,9 @@ class GulfSignApp(tk.Tk):
             self.var_pc_status.set("设置失败")
 
     def _on_pc_clear(self):
-        if sys.platform != "win32":
-            messagebox.showinfo("提示", "此功能仅支持Windows系统")
-            return
-
-        ok = clear_windows_proxy()
+        ok = clear_system_proxy()
         if ok:
-            self._proxy_log("Windows系统代理已清除", "ok")
+            self._proxy_log("系统代理已清除", "ok")
             self.var_pc_status.set("电脑代理已关闭")
         else:
             self._proxy_log("清除系统代理失败", "err")
@@ -1815,8 +1825,7 @@ class GulfSignApp(tk.Tk):
             self._hc_stop.set()
             self._paused = False
         if self._proxy and self._proxy_running:
-            if sys.platform == "win32":
-                clear_windows_proxy()
+            clear_system_proxy()
             self._proxy.stop()
         self._save_current_config()
         self.destroy()

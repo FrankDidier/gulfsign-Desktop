@@ -28,7 +28,9 @@ TARGET_HOSTS = {
     "jkkgzh.hnhfpc.gov.cn",
     "jkkzc.hnhfpc.gov.cn",
     "health.tengmed.com",
+    "h5-health.tengmed.com",
     "wechat.wecity.qq.com",
+    "card.wecity.qq.com",
 }
 
 OPENID_PATTERN = re.compile(
@@ -37,6 +39,10 @@ OPENID_PATTERN = re.compile(
 
 OPENID_JSON_PATTERN = re.compile(
     rb'"(?:openid|openId|OPENID)"\s*:\s*"([a-zA-Z0-9_-]{20,})"'
+)
+
+OPENID_HEADER_PATTERN = re.compile(
+    rb'^openId:\s*(@?[a-zA-Z0-9_-]{15,})', re.MULTILINE
 )
 
 
@@ -49,6 +55,95 @@ def get_local_ip() -> str:
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+def _get_macos_network_service() -> str:
+    """Find the active network service name (usually 'Wi-Fi')."""
+    try:
+        import subprocess
+        r = subprocess.run(["networksetup", "-listallnetworkservices"],
+                           capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            s = line.strip()
+            if s.startswith("*"):
+                continue
+            if "wi-fi" in s.lower() or "wifi" in s.lower():
+                return s
+        for line in r.stdout.splitlines():
+            s = line.strip()
+            if s.startswith("*") or s.startswith("An asterisk"):
+                continue
+            if "ethernet" in s.lower() or "thunderbolt" in s.lower():
+                return s
+    except Exception:
+        pass
+    return "Wi-Fi"
+
+
+def set_system_proxy(host: str, port: int) -> bool:
+    """Set system proxy (auto-detects macOS/Windows)."""
+    if sys.platform == "darwin":
+        return _set_macos_proxy(host, port)
+    elif sys.platform == "win32":
+        return set_windows_proxy(host, port)
+    return False
+
+
+def clear_system_proxy() -> bool:
+    """Clear system proxy (auto-detects macOS/Windows)."""
+    if sys.platform == "darwin":
+        return _clear_macos_proxy()
+    elif sys.platform == "win32":
+        return clear_windows_proxy()
+    return False
+
+
+def install_ca_to_system(ca_cert_path: str) -> bool:
+    """Install CA certificate (auto-detects macOS/Windows)."""
+    if sys.platform == "darwin":
+        return _install_ca_to_macos(ca_cert_path)
+    elif sys.platform == "win32":
+        return install_ca_to_windows(ca_cert_path)
+    return False
+
+
+def _set_macos_proxy(host: str, port: int) -> bool:
+    try:
+        import subprocess
+        svc = _get_macos_network_service()
+        p = str(port)
+        subprocess.run(["networksetup", "-setwebproxy", svc, host, p], capture_output=True)
+        subprocess.run(["networksetup", "-setsecurewebproxy", svc, host, p], capture_output=True)
+        return True
+    except Exception:
+        return False
+
+
+def _clear_macos_proxy() -> bool:
+    try:
+        import subprocess
+        svc = _get_macos_network_service()
+        subprocess.run(["networksetup", "-setwebproxystate", svc, "off"], capture_output=True)
+        subprocess.run(["networksetup", "-setsecurewebproxystate", svc, "off"], capture_output=True)
+        return True
+    except Exception:
+        return False
+
+
+def _install_ca_to_macos(ca_cert_path: str) -> bool:
+    if not os.path.exists(ca_cert_path):
+        return False
+    try:
+        import subprocess
+        r = subprocess.run([
+            "security", "add-trusted-cert",
+            "-r", "trustRoot",
+            "-k", os.path.expanduser("~/Library/Keychains/login.keychain-db"),
+            ca_cert_path,
+        ], capture_output=True, text=True)
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 def set_windows_proxy(host: str, port: int) -> bool:
@@ -653,3 +748,7 @@ h1{color:#333;font-size:22px}
             openid = m.group(1).decode("utf-8", errors="replace")
             if len(openid) >= 20:
                 self._report_openid(openid, "json")
+        for m in OPENID_HEADER_PATTERN.finditer(data):
+            openid = m.group(1).decode("utf-8", errors="replace")
+            if len(openid) >= 15:
+                self._report_openid(openid, "header")

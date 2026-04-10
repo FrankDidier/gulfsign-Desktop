@@ -10,3 +10,5 @@ gulfsign_config.json
 .env
 .DS_Store
 certs/
+traffic_log.txt
+captured_openids.txt
