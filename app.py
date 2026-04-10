@@ -86,6 +86,10 @@ class GulfSignApp(tk.Tk):
         self._proxy: Optional[OpenIDProxy] = None
         self._proxy_running = False
 
+        self._cap_proxy: Optional[OpenIDProxy] = None
+        self._cap_running = False
+        self._cap_request_count = 0
+
         self._cfg = load_config()
 
         self._build_ui()
@@ -123,14 +127,17 @@ class GulfSignApp(tk.Tk):
         tab1 = ttk.Frame(self.notebook, padding=4)
         tab2 = ttk.Frame(self.notebook, padding=4)
         tab3 = ttk.Frame(self.notebook, padding=4)
+        tab4 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
         self.notebook.add(tab3, text=" 获取OpenID ")
+        self.notebook.add(tab4, text=" 流量抓包 ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
         self._build_openid_tab(tab3)
+        self._build_capture_tab(tab4)
 
     # ================================================================
     # Tab 1: 3.0系统签约
@@ -1054,6 +1061,252 @@ class GulfSignApp(tk.Tk):
             self.var_pc_status.set("")
 
     # ================================================================
+    # Tab 4: 流量抓包
+    # ================================================================
+
+    def _build_capture_tab(self, parent):
+        self._build_capture_guide(parent)
+        self._build_capture_controls(parent)
+        self._build_capture_stats(parent)
+        self._build_capture_log(parent)
+
+    def _build_capture_guide(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 使用说明 ", padding=8)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        guide_text = (
+            "流量抓包功能用于记录微信小程序与服务器之间的完整通信数据，\n"
+            "便于分析绑卡、解绑、人脸验证等关键接口的调用流程。\n"
+            "\n"
+            "操作步骤：\n"
+            "  ① 点击「开始抓包」→ 系统自动设置代理和证书\n"
+            "  ② 打开电脑版微信，进入目标小程序（如\"湖南省居民健康卡\"、\"我的健康卡\"等）\n"
+            "  ③ 在小程序中执行需要分析的操作（绑卡、解绑、查看家庭医生等）\n"
+            "  ④ 操作完成后点击「停止抓包」→ 点击「导出日志」保存文件\n"
+            "  ⑤ 将导出的日志文件发送给技术人员进行分析"
+        )
+
+        try:
+            bg = self.cget("background")
+        except Exception:
+            bg = "#f0f0f0"
+        tw = tk.Text(
+            frame, height=8, wrap=tk.WORD, state=tk.NORMAL,
+            font=("", 10), relief=tk.FLAT, background=bg,
+        )
+        tw.insert("1.0", guide_text)
+        tw.configure(state=tk.DISABLED)
+        tw.pack(fill=tk.X)
+
+    def _build_capture_controls(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 抓包控制 ", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        r0 = ttk.Frame(frame)
+        r0.pack(fill=tk.X)
+
+        self.btn_cap_start = ttk.Button(
+            r0, text="▶ 开始抓包", command=self._on_cap_start,
+        )
+        self.btn_cap_start.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.btn_cap_stop = ttk.Button(
+            r0, text="⏹ 停止抓包", command=self._on_cap_stop, state=tk.DISABLED,
+        )
+        self.btn_cap_stop.pack(side=tk.LEFT, padx=(0, 12))
+
+        self.btn_cap_export = ttk.Button(
+            r0, text="导出日志", command=self._on_cap_export,
+        )
+        self.btn_cap_export.pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_cap_status = tk.StringVar(value="未启动")
+        self.lbl_cap_status = ttk.Label(
+            r0, textvariable=self.var_cap_status, style="Info.TLabel",
+        )
+        self.lbl_cap_status.pack(side=tk.LEFT, padx=(8, 0))
+
+    def _build_capture_stats(self, parent):
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        self.var_cap_stats = tk.StringVar(value="拦截请求: 0  |  日志大小: 0 KB")
+        ttk.Label(frame, textvariable=self.var_cap_stats, font=("", 10)).pack(
+            side=tk.LEFT,
+        )
+
+    def _build_capture_log(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 实时抓包日志 ", padding=4)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        log_frame = ttk.Frame(frame)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.cap_log_text = tk.Text(
+            log_frame, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
+        )
+        sb = ttk.Scrollbar(log_frame, command=self.cap_log_text.yview)
+        self.cap_log_text.configure(yscrollcommand=sb.set)
+        self.cap_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.cap_log_text.tag_configure("ok", foreground="#16a34a")
+        self.cap_log_text.tag_configure("err", foreground="#dc2626")
+        self.cap_log_text.tag_configure("info", foreground="#2563eb")
+        self.cap_log_text.tag_configure("warn", foreground="#d97706")
+        self.cap_log_text.tag_configure("req", foreground="#7c3aed")
+        self.cap_log_text.tag_configure("resp", foreground="#0891b2")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(
+            btn_frame, text="清空日志", command=self._clear_cap_log,
+        ).pack(side=tk.RIGHT)
+
+    # -- Tab 4: Capture Logic --
+
+    def _cap_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.cap_log_text.configure(state=tk.NORMAL)
+            self.cap_log_text.insert(tk.END, line, tag)
+            self.cap_log_text.see(tk.END)
+            self.cap_log_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _clear_cap_log(self):
+        self.cap_log_text.configure(state=tk.NORMAL)
+        self.cap_log_text.delete("1.0", tk.END)
+        self.cap_log_text.configure(state=tk.DISABLED)
+
+    def _update_cap_stats(self):
+        if self._cap_proxy and os.path.exists(self._cap_proxy.traffic_log_path):
+            sz = os.path.getsize(self._cap_proxy.traffic_log_path)
+        else:
+            sz = 0
+        kb = sz / 1024
+        self.var_cap_stats.set(
+            "拦截请求: %d  |  日志大小: %.1f KB" % (self._cap_request_count, kb)
+        )
+
+    def _on_cap_start(self):
+        if self._cap_running:
+            return
+
+        if self._proxy_running:
+            messagebox.showwarning("提示", "请先停止「获取OpenID」页面的代理，再启动抓包")
+            return
+
+        self._cap_log("正在启动抓包...", "info")
+        self._cap_request_count = 0
+
+        def on_openid(openid):
+            self.after(0, lambda oid=openid: self._cap_log(
+                "发现 OpenID: %s" % oid, "ok"
+            ))
+
+        def on_log(msg, tag=""):
+            if msg.startswith("拦截"):
+                self._cap_request_count += 1
+                self.after(0, self._update_cap_stats)
+                self._cap_log(msg, "req")
+            else:
+                self._cap_log(msg, tag)
+
+        self._cap_proxy = OpenIDProxy(
+            port=8888,
+            on_openid=on_openid,
+            on_log=on_log,
+        )
+
+        if self._cap_proxy.start():
+            self._cap_running = True
+            self.btn_cap_start.configure(state=tk.DISABLED)
+            self.btn_cap_stop.configure(state=tk.NORMAL)
+            self.var_cap_status.set("抓包运行中")
+            self.lbl_cap_status.configure(style="Success.TLabel")
+
+            ca_path = self._cap_proxy.ca_cert_path
+            cert_ok = install_ca_to_system(ca_path)
+            if cert_ok:
+                self._cap_log("CA证书已安装", "ok")
+            else:
+                self._cap_log("CA证书安装失败，可能需要确认弹窗", "warn")
+
+            proxy_ok = set_system_proxy("127.0.0.1", 8888)
+            if proxy_ok:
+                self._cap_log("系统代理已设置: 127.0.0.1:8888", "ok")
+            else:
+                self._cap_log("系统代理设置失败", "err")
+
+            self._cap_log("", "")
+            self._cap_log("现在请打开电脑版微信，进入需要分析的小程序", "info")
+            self._cap_log("所有目标域名的请求和响应将被完整记录", "info")
+            self._cap_log("", "")
+        else:
+            self.var_cap_status.set("启动失败")
+            self.lbl_cap_status.configure(style="Error.TLabel")
+
+    def _on_cap_stop(self):
+        clear_system_proxy()
+        self._cap_log("系统代理已清除", "ok")
+
+        if self._cap_proxy:
+            self._cap_proxy.stop()
+
+        self._cap_running = False
+        self.btn_cap_start.configure(state=tk.NORMAL)
+        self.btn_cap_stop.configure(state=tk.DISABLED)
+        self.var_cap_status.set("抓包已停止")
+        self.lbl_cap_status.configure(style="Info.TLabel")
+        self._update_cap_stats()
+
+        if self._cap_proxy and os.path.exists(self._cap_proxy.traffic_log_path):
+            sz = os.path.getsize(self._cap_proxy.traffic_log_path)
+            if sz > 0:
+                self._cap_log("", "")
+                self._cap_log(
+                    "日志已保存 (%.1f KB)，请点击「导出日志」保存到指定位置" % (sz / 1024), "ok"
+                )
+
+    def _on_cap_export(self):
+        if not self._cap_proxy:
+            src = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "traffic_log.txt"
+            )
+        else:
+            src = self._cap_proxy.traffic_log_path
+
+        if not os.path.exists(src) or os.path.getsize(src) == 0:
+            messagebox.showinfo("提示", "暂无抓包日志，请先执行抓包操作")
+            return
+
+        dest = filedialog.asksaveasfilename(
+            title="导出抓包日志",
+            defaultextension=".txt",
+            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
+            initialfile="traffic_log_%s.txt" % datetime.now().strftime("%Y%m%d_%H%M%S"),
+        )
+        if not dest:
+            return
+
+        try:
+            import shutil
+            shutil.copy2(src, dest)
+            self._cap_log("日志已导出: %s" % dest, "ok")
+            messagebox.showinfo("导出成功", "抓包日志已保存到:\n%s" % dest)
+        except Exception as e:
+            self._cap_log("导出失败: %s" % e, "err")
+            messagebox.showerror("导出失败", str(e))
+
+    # ================================================================
     # Config
     # ================================================================
 
@@ -1827,6 +2080,9 @@ class GulfSignApp(tk.Tk):
         if self._proxy and self._proxy_running:
             clear_system_proxy()
             self._proxy.stop()
+        if self._cap_proxy and self._cap_running:
+            clear_system_proxy()
+            self._cap_proxy.stop()
         self._save_current_config()
         self.destroy()
 
