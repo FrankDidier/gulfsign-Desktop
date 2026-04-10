@@ -91,7 +91,11 @@ class GulfSignApp(tk.Tk):
     def _build_ui(self):
         style = ttk.Style(self)
         available = style.theme_names()
-        for theme in ("vista", "winnative", "clam", "aqua"):
+        if sys.platform == "darwin":
+            preferred = ("clam", "alt", "default")
+        else:
+            preferred = ("vista", "winnative", "clam", "aqua")
+        for theme in preferred:
             if theme in available:
                 style.theme_use(theme)
                 break
