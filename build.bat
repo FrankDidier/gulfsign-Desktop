@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 echo.
 echo [2/3] 打包 EXE...
-pyinstaller --onefile --windowed --name "GulfSign" --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func app.py
+pyinstaller --onefile --windowed --name "GulfSign" --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func --add-data "hc_api.py;." app.py
 if errorlevel 1 (
     echo 打包失败！
     pause

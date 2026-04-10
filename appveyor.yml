@@ -12,7 +12,7 @@ install:
   - py -3 -m pip install requests gmssl pyinstaller
 
 build_script:
-  - py -3 -m PyInstaller --onefile --windowed --name "GulfSign" --clean --noconfirm --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func app.py
+  - py -3 -m PyInstaller --onefile --windowed --name "GulfSign" --clean --noconfirm --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func --add-data "hc_api.py;." app.py
   - dir dist
 
 artifacts:

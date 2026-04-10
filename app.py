@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 湾流签约助手 — 桌面版
-公卫3.0 批量签约自动化工具
+公卫3.0 批量签约 + 健康卡自动确认
 """
 import os
 import sys
@@ -13,21 +13,18 @@ from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 from typing import List, Optional
 
-# PyInstaller frozen EXE: add bundled data dir to import path
 if getattr(sys, "frozen", False):
     _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     if _bundle_dir not in sys.path:
         sys.path.insert(0, _bundle_dir)
 
 from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
+from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
 
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
 CONFIG_FILE = "gulfsign_config.json"
 
-# ---------------------------------------------------------------------------
-# 配置持久化
-# ---------------------------------------------------------------------------
 
 def _config_path() -> str:
     if getattr(sys, "frozen", False):
@@ -53,31 +50,32 @@ def save_config(cfg: dict):
         pass
 
 
-# ---------------------------------------------------------------------------
-# 主应用
-# ---------------------------------------------------------------------------
-
 class GulfSignApp(tk.Tk):
 
     def __init__(self):
         super().__init__()
 
         self.title(APP_TITLE)
-        self.geometry("960x750")
-        self.minsize(860, 680)
+        self.geometry("980x800")
+        self.minsize(860, 700)
 
         self.client = PH3Client()
+        self.hc_client = HealthCardClient()
         self.patients: List[Patient] = []
         self.selected_ids: set = set()
 
         self._signing = False
         self._paused = False
         self._stop_event = threading.Event()
-
         self._sign_success = 0
         self._sign_fail = 0
         self._sign_total = 0
         self._sign_start_time = 0.0
+
+        self._hc_confirming = False
+        self._hc_stop = threading.Event()
+        self._hc_cards: List[HealthCard] = []
+        self._hc_selected: set = set()
 
         self._cfg = load_config()
 
@@ -87,7 +85,7 @@ class GulfSignApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ================================================================
-    # UI 构建
+    # UI
     # ================================================================
 
     def _build_ui(self):
@@ -101,20 +99,33 @@ class GulfSignApp(tk.Tk):
         style.configure("Success.TLabel", foreground="#16a34a")
         style.configure("Error.TLabel", foreground="#dc2626")
         style.configure("Info.TLabel", foreground="#2563eb")
-        style.configure(
-            "Header.TLabel", font=("", 11, "bold"),
-        )
+        style.configure("Header.TLabel", font=("", 11, "bold"))
 
         main = ttk.Frame(self, padding=8)
         main.pack(fill=tk.BOTH, expand=True)
 
-        self._build_login_section(main)
-        self._build_query_section(main)
-        self._build_table_section(main)
-        self._build_signing_section(main)
-        self._build_log_section(main)
+        self.notebook = ttk.Notebook(main)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
 
-    # ---- 登录区 ----
+        tab1 = ttk.Frame(self.notebook, padding=4)
+        tab2 = ttk.Frame(self.notebook, padding=4)
+
+        self.notebook.add(tab1, text=" 3.0系统签约 ")
+        self.notebook.add(tab2, text=" 健康卡确认 ")
+
+        self._build_ph3_tab(tab1)
+        self._build_hc_tab(tab2)
+
+    # ================================================================
+    # Tab 1: 3.0系统签约
+    # ================================================================
+
+    def _build_ph3_tab(self, parent):
+        self._build_login_section(parent)
+        self._build_query_section(parent)
+        self._build_table_section(parent)
+        self._build_signing_section(parent)
+        self._build_log_section(parent)
 
     def _build_login_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 系统登录 ", padding=6)
@@ -151,8 +162,6 @@ class GulfSignApp(tk.Tk):
         )
         self.lbl_login_status.pack(side=tk.LEFT)
 
-    # ---- 查询区 ----
-
     def _build_query_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 查询条件 ", padding=6)
         frame.pack(fill=tk.X, pady=(0, 4))
@@ -162,11 +171,10 @@ class GulfSignApp(tk.Tk):
 
         ttk.Label(r0, text="签约状态:").pack(side=tk.LEFT)
         self.var_status = tk.StringVar(value="未签约")
-        status_combo = ttk.Combobox(
+        ttk.Combobox(
             r0, textvariable=self.var_status, width=12, state="readonly",
             values=["未签约", "已签约", "医生申请", "居民申请", "拒绝签约", "全部"],
-        )
-        status_combo.pack(side=tk.LEFT, padx=(4, 16))
+        ).pack(side=tk.LEFT, padx=(4, 16))
 
         ttk.Label(r0, text="机构代码:").pack(side=tk.LEFT)
         self.var_org = tk.StringVar()
@@ -211,8 +219,6 @@ class GulfSignApp(tk.Tk):
         ttk.Entry(r1, textvariable=self.var_idcard_filter, width=18).pack(
             side=tk.LEFT, padx=(4, 0)
         )
-
-    # ---- 表格区 ----
 
     def _build_table_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 居民列表 ", padding=4)
@@ -285,8 +291,6 @@ class GulfSignApp(tk.Tk):
         self.tree.tag_configure("selected", background="#dbeafe")
         self.tree.tag_configure("signed_ok", background="#dcfce7")
         self.tree.tag_configure("signed_fail", background="#fee2e2")
-
-    # ---- 签约控制区 ----
 
     def _build_signing_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 批量签约 ", padding=6)
@@ -389,18 +393,16 @@ class GulfSignApp(tk.Tk):
             r3, textvariable=self.var_stats, style="Info.TLabel"
         ).pack(side=tk.RIGHT)
 
-    # ---- 日志区 ----
-
     def _build_log_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 运行日志 ", padding=4)
         frame.pack(fill=tk.BOTH, expand=False, pady=(0, 0))
-        frame.configure(height=140)
+        frame.configure(height=120)
 
         log_frame = ttk.Frame(frame)
         log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
+            log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED,
             font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
         )
         log_sb = ttk.Scrollbar(log_frame, command=self.log_text.yview)
@@ -420,7 +422,189 @@ class GulfSignApp(tk.Tk):
         )
 
     # ================================================================
-    # 配置 保存/恢复
+    # Tab 2: 健康卡确认
+    # ================================================================
+
+    def _build_hc_tab(self, parent):
+        self._build_hc_connect(parent)
+        self._build_hc_card_table(parent)
+        self._build_hc_control(parent)
+        self._build_hc_log(parent)
+
+    def _build_hc_connect(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 健康卡连接 ", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        r0 = ttk.Frame(frame)
+        r0.pack(fill=tk.X)
+        ttk.Label(r0, text="微信OpenID:").pack(side=tk.LEFT)
+        self.var_hc_openid = tk.StringVar()
+        ttk.Entry(r0, textvariable=self.var_hc_openid, width=40).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+
+        self.btn_hc_connect = ttk.Button(
+            r0, text="连接", command=self._on_hc_connect
+        )
+        self.btn_hc_connect.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_hc_refresh = ttk.Button(
+            r0, text="刷新卡列表", command=self._on_hc_refresh, state=tk.DISABLED
+        )
+        self.btn_hc_refresh.pack(side=tk.LEFT, padx=(0, 8))
+
+        r1 = ttk.Frame(frame)
+        r1.pack(fill=tk.X, pady=(4, 0))
+        self.var_hc_status = tk.StringVar(value="未连接")
+        self.lbl_hc_status = ttk.Label(
+            r1, textvariable=self.var_hc_status, style="Info.TLabel"
+        )
+        self.lbl_hc_status.pack(side=tk.LEFT)
+
+        ttk.Label(
+            r1,
+            text="(OpenID通过微信小程序抓包获取，每个OpenID最多绑定9张健康卡)",
+            foreground="gray",
+        ).pack(side=tk.RIGHT)
+
+    def _build_hc_card_table(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 健康卡列表 ", padding=4)
+        frame.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        toolbar = ttk.Frame(frame)
+        toolbar.pack(fill=tk.X, pady=(0, 4))
+
+        self.var_hc_check_all = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            toolbar, text="全选", variable=self.var_hc_check_all,
+            command=self._on_hc_toggle_all,
+        ).pack(side=tk.LEFT)
+
+        self.var_hc_select_info = tk.StringVar(value="已选: 0")
+        ttk.Label(toolbar, textvariable=self.var_hc_select_info).pack(
+            side=tk.LEFT, padx=(16, 0)
+        )
+
+        self.var_hc_summary = tk.StringVar(value="")
+        ttk.Label(
+            toolbar, textvariable=self.var_hc_summary, style="Info.TLabel"
+        ).pack(side=tk.RIGHT)
+
+        cols = (
+            "seq", "name", "id_card", "age", "category",
+            "gender", "rpc_status", "relation",
+        )
+        col_names = {
+            "seq": "#", "name": "姓名", "id_card": "身份证号",
+            "age": "年龄", "category": "人群分类",
+            "gender": "性别", "rpc_status": "人脸认证",
+            "relation": "关系",
+        }
+        col_widths = {
+            "seq": 35, "name": 80, "id_card": 170, "age": 45,
+            "category": 70, "gender": 45, "rpc_status": 80,
+            "relation": 50,
+        }
+        col_anchors = {
+            "seq": "center", "name": "center", "age": "center",
+            "category": "center", "gender": "center",
+            "rpc_status": "center", "relation": "center",
+        }
+
+        tree_frame = ttk.Frame(frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.hc_tree = ttk.Treeview(
+            tree_frame, columns=cols, show="headings", selectmode="extended",
+        )
+        for c in cols:
+            self.hc_tree.heading(c, text=col_names[c])
+            anchor = col_anchors.get(c, "w")
+            self.hc_tree.column(
+                c, width=col_widths.get(c, 80), minwidth=35, anchor=anchor,
+            )
+
+        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.hc_tree.yview)
+        self.hc_tree.configure(yscrollcommand=vsb.set)
+
+        self.hc_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        self.hc_tree.bind("<Button-1>", self._on_hc_tree_click)
+
+        self.hc_tree.tag_configure("selected", background="#dbeafe")
+        self.hc_tree.tag_configure("confirm_ok", background="#dcfce7")
+        self.hc_tree.tag_configure("confirm_fail", background="#fee2e2")
+        self.hc_tree.tag_configure("skipped", background="#fef9c3")
+
+    def _build_hc_control(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 批量确认 ", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        r0 = ttk.Frame(frame)
+        r0.pack(fill=tk.X)
+
+        self.btn_hc_confirm = ttk.Button(
+            r0, text="▶ 一键确认签约", command=self._on_hc_start_confirm,
+        )
+        self.btn_hc_confirm.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_hc_stop = ttk.Button(
+            r0, text="⏹ 停止", command=self._on_hc_stop, state=tk.DISABLED,
+        )
+        self.btn_hc_stop.pack(side=tk.LEFT, padx=(0, 12))
+
+        self.hc_progress = ttk.Progressbar(r0, mode="determinate", length=300)
+        self.hc_progress.pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_hc_progress_text = tk.StringVar(value="就绪")
+        ttk.Label(r0, textvariable=self.var_hc_progress_text).pack(side=tk.LEFT)
+
+        self.var_hc_stats = tk.StringVar(value="")
+        ttk.Label(
+            r0, textvariable=self.var_hc_stats, style="Info.TLabel"
+        ).pack(side=tk.RIGHT)
+
+        r1 = ttk.Frame(frame)
+        r1.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(
+            r1,
+            text="流程: 自动设置人脸认证(updateRpc) → 查询签约状态 → 确认待确认合同(editqr)",
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+
+    def _build_hc_log(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 运行日志 ", padding=4)
+        frame.pack(fill=tk.BOTH, expand=False, pady=(0, 0))
+        frame.configure(height=140)
+
+        log_frame = ttk.Frame(frame)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.hc_log_text = tk.Text(
+            log_frame, height=7, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
+        )
+        log_sb = ttk.Scrollbar(log_frame, command=self.hc_log_text.yview)
+        self.hc_log_text.configure(yscrollcommand=log_sb.set)
+        self.hc_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.hc_log_text.tag_configure("ok", foreground="#16a34a")
+        self.hc_log_text.tag_configure("err", foreground="#dc2626")
+        self.hc_log_text.tag_configure("info", foreground="#2563eb")
+        self.hc_log_text.tag_configure("warn", foreground="#d97706")
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(
+            btn_frame, text="清空日志", command=self._clear_hc_log
+        ).pack(side=tk.RIGHT)
+
+    # ================================================================
+    # Config
     # ================================================================
 
     def _restore_config(self):
@@ -445,6 +629,8 @@ class GulfSignApp(tk.Tk):
             self.var_agree_end.set(c["agree_end"])
         if c.get("max_count"):
             self.var_max_count.set(c["max_count"])
+        if c.get("hc_openid"):
+            self.var_hc_openid.set(c["hc_openid"])
 
     def _save_current_config(self):
         save_config({
@@ -458,10 +644,11 @@ class GulfSignApp(tk.Tk):
             "agree_start": self.var_agree_start.get(),
             "agree_end": self.var_agree_end.get(),
             "max_count": self.var_max_count.get(),
+            "hc_openid": self.var_hc_openid.get(),
         })
 
     # ================================================================
-    # 日志
+    # Logging (Tab 1)
     # ================================================================
 
     def _log(self, msg: str, tag: str = ""):
@@ -485,7 +672,31 @@ class GulfSignApp(tk.Tk):
         self.log_text.configure(state=tk.DISABLED)
 
     # ================================================================
-    # 登录
+    # Logging (Tab 2 - Health Card)
+    # ================================================================
+
+    def _hc_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.hc_log_text.configure(state=tk.NORMAL)
+            self.hc_log_text.insert(tk.END, line, tag)
+            self.hc_log_text.see(tk.END)
+            self.hc_log_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _clear_hc_log(self):
+        self.hc_log_text.configure(state=tk.NORMAL)
+        self.hc_log_text.delete("1.0", tk.END)
+        self.hc_log_text.configure(state=tk.DISABLED)
+
+    # ================================================================
+    # Tab 1: Login
     # ================================================================
 
     def _on_login(self):
@@ -529,7 +740,7 @@ class GulfSignApp(tk.Tk):
             self._log("✗ %s" % msg, "err")
 
     # ================================================================
-    # 查询
+    # Tab 1: Query
     # ================================================================
 
     def _get_status_code(self) -> str:
@@ -631,8 +842,6 @@ class GulfSignApp(tk.Tk):
                 p.signing_date, p.agreement_end, p.person_id,
             ), tags=tags)
 
-    # ---- 表格交互 ----
-
     def _on_tree_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
         if region == "heading":
@@ -662,8 +871,6 @@ class GulfSignApp(tk.Tk):
         self.var_select_info.set(
             "已选: %d / %d" % (len(self.selected_ids), len(self.patients))
         )
-
-    # ---- 导出 ----
 
     def _on_export(self):
         if not self.patients:
@@ -698,7 +905,7 @@ class GulfSignApp(tk.Tk):
             messagebox.showerror("导出失败", str(e))
 
     # ================================================================
-    # 批量签约
+    # Tab 1: Batch Signing
     # ================================================================
 
     def _get_pop_type_code(self) -> str:
@@ -800,14 +1007,7 @@ class GulfSignApp(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _batch_sign_worker(
-        self,
-        targets: List[Patient],
-        delay: float,
-        doctor: str,
-        team: str,
-        sign_opts: dict = None,
-    ):
+    def _batch_sign_worker(self, targets, delay, doctor, team, sign_opts=None):
         opts = sign_opts or {}
         for i, patient in enumerate(targets):
             if self._stop_event.is_set():
@@ -925,34 +1125,264 @@ class GulfSignApp(tk.Tk):
         self._stop_event.set()
         self._paused = False
 
+    # ================================================================
+    # Tab 2: Health Card - Connect
+    # ================================================================
+
+    def _on_hc_connect(self):
+        openid = self.var_hc_openid.get().strip()
+        if not openid:
+            messagebox.showwarning("提示", "请输入微信OpenID")
+            return
+
+        self.btn_hc_connect.configure(state=tk.DISABLED)
+        self.var_hc_status.set("正在连接...")
+        self.lbl_hc_status.configure(style="Info.TLabel")
+        self._hc_log("连接健康卡平台 (OpenID: %s)..." % openid[:20], "info")
+
+        def worker():
+            ok, msg = self.hc_client.connect(openid)
+            if ok:
+                cards = self.hc_client.get_card_list()
+                self.after(0, lambda: self._hc_connect_done(True, msg, cards))
+            else:
+                self.after(0, lambda: self._hc_connect_done(False, msg, []))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _hc_connect_done(self, ok: bool, msg: str, cards: List[HealthCard]):
+        self.btn_hc_connect.configure(state=tk.NORMAL)
+        self.var_hc_status.set(msg)
+
+        if ok:
+            self.lbl_hc_status.configure(style="Success.TLabel")
+            self.btn_hc_refresh.configure(state=tk.NORMAL)
+            self._hc_log("✓ %s" % msg, "ok")
+
+            self._hc_cards = cards
+            self._hc_selected = set(c.health_card_id for c in cards)
+            self.var_hc_check_all.set(True)
+            self._refresh_hc_table()
+            self._hc_log("找到 %d 张健康卡" % len(cards), "info")
+            self._save_current_config()
+        else:
+            self.lbl_hc_status.configure(style="Error.TLabel")
+            self._hc_log("✗ %s" % msg, "err")
+
+    def _on_hc_refresh(self):
+        if not self.hc_client.connected:
+            return
+
+        self.btn_hc_refresh.configure(state=tk.DISABLED)
+        self._hc_log("刷新卡列表...", "info")
+
+        def worker():
+            cards = self.hc_client.get_card_list()
+            self.after(0, lambda: self._hc_refresh_done(cards))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _hc_refresh_done(self, cards: List[HealthCard]):
+        self.btn_hc_refresh.configure(state=tk.NORMAL)
+        self._hc_cards = cards
+        self._hc_selected = set(c.health_card_id for c in cards)
+        self.var_hc_check_all.set(True)
+        self._refresh_hc_table()
+        self._hc_log("卡列表已刷新: %d 张" % len(cards), "ok")
+
+    # ================================================================
+    # Tab 2: Health Card - Table
+    # ================================================================
+
+    def _refresh_hc_table(self):
+        self.hc_tree.delete(*self.hc_tree.get_children())
+        for i, c in enumerate(self._hc_cards, 1):
+            tags = ()
+            if c.health_card_id in self._hc_selected:
+                tags = ("selected",)
+
+            gender_map = {"1": "男", "2": "女"}
+            rpc_text = "已认证" if c.is_verified else "未认证"
+
+            self.hc_tree.insert("", tk.END, iid=c.health_card_id, values=(
+                i, c.name, c.id_card, c.age, c.age_category,
+                gender_map.get(c.gender, c.gender), rpc_text, c.relation,
+            ), tags=tags)
+
+        verified = sum(1 for c in self._hc_cards if c.is_verified)
+        self.var_hc_summary.set(
+            "共 %d 张卡, 已认证 %d, 未认证 %d" % (
+                len(self._hc_cards), verified, len(self._hc_cards) - verified
+            )
+        )
+        self._update_hc_select_info()
+
+    def _on_hc_tree_click(self, event):
+        region = self.hc_tree.identify_region(event.x, event.y)
+        if region == "heading":
+            return
+        item = self.hc_tree.identify_row(event.y)
+        if not item:
+            return
+        if item in self._hc_selected:
+            self._hc_selected.discard(item)
+            self.hc_tree.item(item, tags=())
+        else:
+            self._hc_selected.add(item)
+            self.hc_tree.item(item, tags=("selected",))
+        self._update_hc_select_info()
+        self.hc_tree.selection_remove(self.hc_tree.selection())
+        return "break"
+
+    def _on_hc_toggle_all(self):
+        if self.var_hc_check_all.get():
+            self._hc_selected = set(c.health_card_id for c in self._hc_cards)
+        else:
+            self._hc_selected = set()
+        self._refresh_hc_table()
+
+    def _update_hc_select_info(self):
+        self.var_hc_select_info.set(
+            "已选: %d / %d" % (len(self._hc_selected), len(self._hc_cards))
+        )
+
+    # ================================================================
+    # Tab 2: Health Card - Confirm
+    # ================================================================
+
+    def _on_hc_start_confirm(self):
+        if self._hc_confirming:
+            return
+
+        if not self.hc_client.connected:
+            messagebox.showwarning("提示", "请先连接健康卡平台")
+            return
+
+        targets = [c for c in self._hc_cards if c.health_card_id in self._hc_selected]
+        if not targets:
+            messagebox.showwarning("提示", "请选择要处理的健康卡")
+            return
+
+        msg = "即将对 %d 张健康卡执行自动确认签约：\n\n" % len(targets)
+        msg += "流程: 设置人脸认证 → 查询签约 → 确认待确认合同\n\n"
+        msg += "是否继续？"
+        if not messagebox.askyesno("确认操作", msg):
+            return
+
+        self._hc_confirming = True
+        self._hc_stop.clear()
+
+        self.btn_hc_confirm.configure(state=tk.DISABLED)
+        self.btn_hc_stop.configure(state=tk.NORMAL)
+        self.btn_hc_connect.configure(state=tk.DISABLED)
+        self.btn_hc_refresh.configure(state=tk.DISABLED)
+
+        self.hc_progress.configure(maximum=len(targets), value=0)
+        self.var_hc_progress_text.set("0 / %d" % len(targets))
+        self.var_hc_stats.set("")
+
+        self._hc_log("=" * 50, "info")
+        self._hc_log("开始批量确认: %d 张卡" % len(targets), "info")
+
+        def worker():
+            self._hc_confirm_worker(targets)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _hc_confirm_worker(self, targets: List[HealthCard]):
+        success = 0
+        fail = 0
+        skipped = 0
+        t0 = time.time()
+
+        for i, card in enumerate(targets):
+            if self._hc_stop.is_set():
+                self.after(0, lambda: self._hc_log("已手动停止", "warn"))
+                break
+
+            self.after(
+                0,
+                lambda idx=i, c=card: self._hc_log(
+                    "处理 [%d/%d] %s (%s, %s)" % (
+                        idx + 1, len(targets), c.name, c.age_category or "?", c.id_card
+                    ),
+                    "info",
+                ),
+            )
+
+            result = self.hc_client.process_card(
+                card,
+                log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+            )
+
+            if result is None:
+                tag = "skipped"
+                skipped += 1
+            elif result.success:
+                tag = "confirm_ok"
+                success += 1
+            else:
+                tag = "confirm_fail"
+                fail += 1
+
+            def _update_row(idx=i, t=tag, s=success, f=fail, sk=skipped):
+                hcid = targets[idx].health_card_id
+                children = self.hc_tree.get_children()
+                if hcid in children:
+                    self.hc_tree.item(hcid, tags=(t,))
+                self.hc_progress.configure(value=idx + 1)
+                self.var_hc_progress_text.set("%d / %d" % (idx + 1, len(targets)))
+                elapsed = time.time() - t0
+                speed = elapsed / (idx + 1)
+                self.var_hc_stats.set(
+                    "确认: %d  失败: %d  跳过: %d  速度: %.1f秒/人" % (s, f, sk, speed)
+                )
+
+            self.after(0, _update_row)
+            time.sleep(0.3)
+
+        def _done(s=success, f=fail, sk=skipped):
+            self._hc_confirming = False
+            self.btn_hc_confirm.configure(state=tk.NORMAL)
+            self.btn_hc_stop.configure(state=tk.DISABLED)
+            self.btn_hc_connect.configure(state=tk.NORMAL)
+            if self.hc_client.connected:
+                self.btn_hc_refresh.configure(state=tk.NORMAL)
+
+            elapsed = time.time() - t0
+            self._hc_log("=" * 50, "info")
+            self._hc_log(
+                "确认完成! 成功: %d, 失败: %d, 跳过: %d, 耗时: %.1f秒" % (
+                    s, f, sk, elapsed
+                ),
+                "ok" if f == 0 else "warn",
+            )
+
+        self.after(0, _done)
+
+    def _on_hc_stop(self):
+        self._hc_stop.set()
+
+    # ================================================================
+    # Close
+    # ================================================================
+
     def _on_close(self):
-        if self._signing:
-            if not messagebox.askyesno("确认退出", "正在签约中，确定要退出吗？"):
+        if self._signing or self._hc_confirming:
+            if not messagebox.askyesno("确认退出", "正在执行操作，确定要退出吗？"):
                 return
             self._stop_event.set()
+            self._hc_stop.set()
             self._paused = False
         self._save_current_config()
         self.destroy()
 
 
-# ---------------------------------------------------------------------------
-# 入口
-# ---------------------------------------------------------------------------
-
 def main():
     try:
         from gmssl.sm4 import CryptSM4
     except ImportError:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror(
-            "缺少依赖",
-            "未安装 gmssl 加密库。\n\n"
-            "请执行以下命令安装:\n"
-            "  pip install gmssl\n\n"
-            "安装后重新启动程序。"
-        )
-        sys.exit(1)
+        pass
 
     app = GulfSignApp()
     app.mainloop()
