@@ -89,6 +89,7 @@ class HealthCardClient:
     def __init__(self, base_url: str = HC_BASE_URL):
         self.base_url = base_url
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.verify = False
         self.session.headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

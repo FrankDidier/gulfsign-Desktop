@@ -245,6 +245,7 @@ class PH3Client:
     def login(self, base_url: str, account: str, password: str) -> Tuple[bool, str]:
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.mount("https://", _LooseTLSAdapter())
         self.session.verify = False
         self.session.headers.update({
