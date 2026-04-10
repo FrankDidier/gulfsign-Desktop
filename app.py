@@ -437,10 +437,34 @@ class GulfSignApp(tk.Tk):
     # ================================================================
 
     def _build_hc_tab(self, parent):
+        self._build_hc_workflow_guide(parent)
         self._build_hc_connect(parent)
         self._build_hc_card_table(parent)
         self._build_hc_control(parent)
         self._build_hc_log(parent)
+
+    def _build_hc_workflow_guide(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 操作流程（每批最多9人）", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        guide = (
+            "① 微信小程序\"我的健康卡\" → 添加家庭成员 → 绑定签约对象（输入姓名+身份证号）\n"
+            "② 本软件点击「刷新卡列表」→ 看到绑定的卡 → 点击「一键确认签约」\n"
+            "③ 确认完成后 → 微信小程序\"我的健康卡\" → 解绑已确认的卡\n"
+            "④ 继续绑定下一批 → 重复以上步骤（每个OpenID最多同时绑9张卡）"
+        )
+
+        try:
+            bg = self.cget("background")
+        except Exception:
+            bg = "#f0f0f0"
+        text_w = tk.Text(
+            frame, height=4, wrap=tk.WORD, state=tk.NORMAL,
+            font=("", 10), relief=tk.FLAT, background=bg,
+        )
+        text_w.insert("1.0", guide)
+        text_w.configure(state=tk.DISABLED)
+        text_w.pack(fill=tk.X)
 
     def _build_hc_connect(self, parent):
         frame = ttk.LabelFrame(parent, text=" 健康卡连接 ", padding=6)
@@ -474,7 +498,7 @@ class GulfSignApp(tk.Tk):
 
         ttk.Label(
             r1,
-            text="(OpenID通过微信小程序抓包获取，每个OpenID最多绑定9张健康卡)",
+            text="(OpenID通过\"获取OpenID\"标签页抓包获取，每个OpenID最多绑定9张健康卡)",
             foreground="gray",
         ).pack(side=tk.RIGHT)
 
@@ -582,7 +606,7 @@ class GulfSignApp(tk.Tk):
         r1.pack(fill=tk.X, pady=(4, 0))
         ttk.Label(
             r1,
-            text="流程: 自动设置人脸认证(updateRpc) → 查询签约状态 → 确认待确认合同(editqr)",
+            text="自动流程: 设置人脸认证 → 查询签约状态 → 确认待确认合同  |  只处理3.0系统\"医生申请\"(状态5)的签约",
             foreground="gray",
         ).pack(side=tk.LEFT)
 
