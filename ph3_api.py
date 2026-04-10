@@ -194,6 +194,7 @@ class PH3Client:
     def __init__(self):
         self.base_url: str = ""
         self.session: requests.Session = requests.Session()
+        self.session.trust_env = False  # 忽略系统代理（避免与 OpenID/抓包代理冲突）
         self.token_en: str = ""
         self.token_th: str = ""
         self.org_code: str = ""
