@@ -1078,6 +1078,9 @@ class GulfSignApp(tk.Tk):
             "流量抓包功能用于记录微信小程序与服务器之间的完整通信数据，\n"
             "便于分析绑卡、解绑、人脸验证等关键接口的调用流程。\n"
             "\n"
+            "说明：日志里的「已记录」表示请求已被解密并写入日志，代理会照常转发，\n"
+            "不会故意阻断小程序；若页面一直转圈，再检查证书是否信任、是否已重启微信。\n"
+            "\n"
             "操作步骤：\n"
             "  ① 点击「开始抓包」→ 系统自动设置代理和证书\n"
             "  ② 打开电脑版微信，进入目标小程序（如\"湖南省居民健康卡\"、\"我的健康卡\"等）\n"
@@ -1091,7 +1094,7 @@ class GulfSignApp(tk.Tk):
         except Exception:
             bg = "#f0f0f0"
         tw = tk.Text(
-            frame, height=8, wrap=tk.WORD, state=tk.NORMAL,
+            frame, height=10, wrap=tk.WORD, state=tk.NORMAL,
             font=("", 10), relief=tk.FLAT, background=bg,
         )
         tw.insert("1.0", guide_text)
@@ -1130,7 +1133,7 @@ class GulfSignApp(tk.Tk):
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=(0, 4))
 
-        self.var_cap_stats = tk.StringVar(value="拦截请求: 0  |  日志大小: 0 KB")
+        self.var_cap_stats = tk.StringVar(value="已记录请求: 0  |  日志大小: 0 KB")
         ttk.Label(frame, textvariable=self.var_cap_stats, font=("", 10)).pack(
             side=tk.LEFT,
         )
@@ -1193,7 +1196,7 @@ class GulfSignApp(tk.Tk):
             sz = 0
         kb = sz / 1024
         self.var_cap_stats.set(
-            "拦截请求: %d  |  日志大小: %.1f KB" % (self._cap_request_count, kb)
+            "已记录请求: %d  |  日志大小: %.1f KB" % (self._cap_request_count, kb)
         )
 
     def _on_cap_start(self):
@@ -1213,7 +1216,7 @@ class GulfSignApp(tk.Tk):
             ))
 
         def on_log(msg, tag=""):
-            if msg.startswith("拦截"):
+            if msg.startswith("已记录"):
                 self._cap_request_count += 1
                 self.after(0, self._update_cap_stats)
                 self._cap_log(msg, "req")

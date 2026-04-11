@@ -718,7 +718,8 @@ h1{color:#333;font-size:22px}
             self._log_traffic(hostname, ">>> REQUEST", request_data)
 
             req_line = request_data.split(b"\r\n")[0].decode("utf-8", errors="replace")
-            self._log("拦截 [%s] %s" % (hostname, req_line[:80]), "info")
+            # 「已记录」= 解密并写入日志后照常转发，并非阻断业务
+            self._log("已记录 [%s] %s" % (hostname, req_line[:80]), "info")
 
             remote_ctx = ssl.create_default_context()
             remote_ctx.check_hostname = False

@@ -490,7 +490,7 @@ def mitm_intercept(client_sock, hostname, port):
         log_traffic(hostname, ">>> REQUEST", request_data)
 
         req_line = request_data.split(b"\r\n")[0].decode("utf-8", errors="replace")
-        log.info("拦截 [%s] %s", hostname, req_line[:80])
+        log.info("已记录 [%s] %s", hostname, req_line[:80])
 
         remote_ctx = ssl.create_default_context()
         remote_ctx.check_hostname = False
