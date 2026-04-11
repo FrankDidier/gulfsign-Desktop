@@ -481,44 +481,69 @@ def mitm_intercept(client_sock, hostname, port):
     except Exception:
         return
 
+    remote_ssl = None
     try:
-        request_data = client_ssl.recv(16384)
-        if not request_data:
-            return
-
-        scan_openid(request_data)
-        log_traffic(hostname, ">>> REQUEST", request_data)
-
-        req_line = request_data.split(b"\r\n")[0].decode("utf-8", errors="replace")
-        log.info("已记录 [%s] %s", hostname, req_line[:80])
-
         remote_ctx = ssl.create_default_context()
         remote_ctx.check_hostname = False
         remote_ctx.verify_mode = ssl.CERT_NONE
-
         remote_raw = socket.create_connection((hostname, port), timeout=10)
         remote_ssl = remote_ctx.wrap_socket(remote_raw, server_hostname=hostname)
-        remote_ssl.sendall(request_data)
 
-        resp_chunks = []
+        client_ssl.settimeout(60)
+
         while True:
             try:
-                chunk = remote_ssl.recv(8192)
-                if not chunk:
-                    break
-                resp_chunks.append(chunk)
-                scan_openid(chunk)
-                client_ssl.sendall(chunk)
-            except (ssl.SSLError, socket.timeout):
+                request_data = client_ssl.recv(65536)
+            except (socket.timeout, ssl.SSLError, OSError):
+                break
+            if not request_data:
                 break
 
-        if resp_chunks:
-            log_traffic(hostname, "<<< RESPONSE", b"".join(resp_chunks))
+            scan_openid(request_data)
+            log_traffic(hostname, ">>> REQUEST", request_data)
 
-        remote_ssl.close()
+            req_line = request_data.split(b"\r\n")[0].decode("utf-8", errors="replace")
+            log.info("已记录 [%s] %s", hostname, req_line[:80])
+
+            try:
+                remote_ssl.sendall(request_data)
+            except (OSError, ssl.SSLError):
+                break
+
+            resp_chunks = []
+            remote_ssl.settimeout(15)
+            got_first = False
+            while True:
+                try:
+                    chunk = remote_ssl.recv(16384)
+                    if not chunk:
+                        break
+                    resp_chunks.append(chunk)
+                    scan_openid(chunk)
+                    client_ssl.sendall(chunk)
+                    if not got_first:
+                        remote_ssl.settimeout(2)
+                        got_first = True
+                except socket.timeout:
+                    break
+                except (ssl.SSLError, OSError):
+                    break
+
+            if resp_chunks:
+                log_traffic(hostname, "<<< RESPONSE", b"".join(resp_chunks))
+
+            full_resp = b"".join(resp_chunks).lower()
+            if b"connection: close" in full_resp or b"connection: close" in request_data.lower():
+                break
+
     except Exception as e:
         log.debug("MITM error %s: %s", hostname, e)
     finally:
+        if remote_ssl:
+            try:
+                remote_ssl.close()
+            except Exception:
+                pass
         try:
             client_ssl.close()
         except Exception:
