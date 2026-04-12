@@ -486,7 +486,7 @@ def mitm_intercept(client_sock, hostname, port):
         remote_ctx = ssl.create_default_context()
         remote_ctx.check_hostname = False
         remote_ctx.verify_mode = ssl.CERT_NONE
-        remote_raw = socket.create_connection((hostname, port), timeout=10)
+        remote_raw = socket.create_connection((hostname, port), timeout=15)
         remote_ssl = remote_ctx.wrap_socket(remote_raw, server_hostname=hostname)
 
         client_ssl.settimeout(60)
@@ -510,30 +510,47 @@ def mitm_intercept(client_sock, hostname, port):
             except (OSError, ssl.SSLError):
                 break
 
-            resp_chunks = []
-            remote_ssl.settimeout(15)
-            got_first = False
+            response = b""
+            remote_ssl.settimeout(20)
+            hdr_end = -1
+            cl = -1
+
             while True:
                 try:
                     chunk = remote_ssl.recv(16384)
                     if not chunk:
                         break
-                    resp_chunks.append(chunk)
+                    response += chunk
                     scan_openid(chunk)
                     client_ssl.sendall(chunk)
-                    if not got_first:
-                        remote_ssl.settimeout(2)
-                        got_first = True
+
+                    if hdr_end < 0 and b"\r\n\r\n" in response:
+                        hdr_end = response.index(b"\r\n\r\n") + 4
+                        hdr_lower = response[:hdr_end].lower()
+                        m = re.search(rb"content-length:\s*(\d+)", hdr_lower)
+                        if m:
+                            cl = int(m.group(1))
+                        else:
+                            remote_ssl.settimeout(10)
+
+                    if cl >= 0 and hdr_end > 0:
+                        if len(response) - hdr_end >= cl:
+                            break
+                    elif hdr_end > 0:
+                        if b"\r\n0\r\n\r\n" in response[-32:]:
+                            break
+                        remote_ssl.settimeout(10)
+
                 except socket.timeout:
                     break
                 except (ssl.SSLError, OSError):
                     break
 
-            if resp_chunks:
-                log_traffic(hostname, "<<< RESPONSE", b"".join(resp_chunks))
+            if response:
+                log_traffic(hostname, "<<< RESPONSE", response)
 
-            full_resp = b"".join(resp_chunks).lower()
-            if b"connection: close" in full_resp or b"connection: close" in request_data.lower():
+            resp_lower = response.lower()
+            if b"connection: close" in resp_lower or b"connection: close" in request_data.lower():
                 break
 
     except Exception as e:
