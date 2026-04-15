@@ -27,10 +27,20 @@ TARGET_HOSTS = {
     "jkkyljl.hnhfpc.gov.cn",
     "jkkgzh.hnhfpc.gov.cn",
     "jkkzc.hnhfpc.gov.cn",
+    "ggws.hnhfpc.gov.cn",
+    "ggwsfw.hnhfpc.gov.cn",
+    "sjfx.hnhfpc.gov.cn",
+}
+
+TUNNEL_HOSTS = {
     "health.tengmed.com",
     "h5-health.tengmed.com",
     "wechat.wecity.qq.com",
     "card.wecity.qq.com",
+    "open.weixin.qq.com",
+    "api.weixin.qq.com",
+    "res.wx.qq.com",
+    "mp.weixin.qq.com",
 }
 
 OPENID_PATTERN = re.compile(

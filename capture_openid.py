@@ -37,10 +37,9 @@ TARGET_HOSTS = {
     "jkkyljl.hnhfpc.gov.cn",
     "jkkgzh.hnhfpc.gov.cn",
     "jkkzc.hnhfpc.gov.cn",
-    "health.tengmed.com",
-    "h5-health.tengmed.com",
-    "wechat.wecity.qq.com",
-    "card.wecity.qq.com",
+    "ggws.hnhfpc.gov.cn",
+    "ggwsfw.hnhfpc.gov.cn",
+    "sjfx.hnhfpc.gov.cn",
 }
 
 OPENID_RE = re.compile(rb'[?&](?:[Oo]pen[Ii]d|OPENID)=([a-zA-Z0-9_-]{20,})')
