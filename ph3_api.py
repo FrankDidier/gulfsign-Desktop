@@ -798,6 +798,120 @@ class PH3Client:
         except Exception:
             return False
 
+    # ---- 档案修改 (B0101 ACTION=2) ----
+
+    def load_archive(self, person_id: str) -> Tuple[bool, Dict, str]:
+        """Load the archive edit form for a person, return all form fields.
+
+        Returns (success, fields_dict, error_message).
+        """
+        if not self.logged_in:
+            return False, {}, "未登录"
+
+        try:
+            ts = str(int(time.time() * 1000))
+            enc_guid = PH3Crypto.crptosEn(person_id + "|" + ts, self.token_en)
+            sign = PH3Crypto.crptosTH(enc_guid + self.token_th)
+
+            resp = self.session.get(
+                self._url("/Sys_JCWS/B0101/Pg_Edit_B0101.aspx"),
+                params={"GUID": enc_guid, "sign": sign},
+                timeout=self._timeout,
+            )
+            if resp.status_code != 200:
+                return False, {}, "加载失败 HTTP %d" % resp.status_code
+
+            html = resp.text
+            fields: Dict[str, str] = {}
+
+            for m in re.finditer(r"<input\b([^>]+)>", html, re.I):
+                attrs = m.group(1)
+                tp = re.search(r'type=["\']([^"\']+)', attrs, re.I)
+                ftype = tp.group(1).lower() if tp else "text"
+                if ftype in ("checkbox", "radio", "submit", "reset", "button"):
+                    continue
+                n = re.search(r'name=["\']([^"\']+)', attrs, re.I)
+                v = re.search(r'value=["\']([^"\']*)', attrs, re.I)
+                if n:
+                    fields[n.group(1)] = v.group(1) if v else ""
+
+            for m in re.finditer(
+                r'<select[^>]+name=["\']([^"\']+)["\'][^>]*>(.*?)</select>',
+                html, re.DOTALL | re.I,
+            ):
+                name = m.group(1)
+                opts_html = m.group(2)
+                sel = re.search(
+                    r'<option[^>]+selected[^>]*value=["\']([^"\']*)', opts_html, re.I,
+                )
+                if not sel:
+                    sel = re.search(
+                        r'<option[^>]*value=["\']([^"\']*)[^>]*selected',
+                        opts_html, re.I,
+                    )
+                fields[name] = sel.group(1) if sel else ""
+
+            for m in re.finditer(
+                r'<textarea[^>]+name=["\']([^"\']+)["\'][^>]*>(.*?)</textarea>',
+                html, re.DOTALL | re.I,
+            ):
+                fields[m.group(1)] = m.group(2).strip()
+
+            if "GUID" not in fields:
+                fields["GUID"] = person_id
+
+            return True, fields, ""
+
+        except Exception as e:
+            return False, {}, str(e)
+
+    def modify_archive(self, person_id: str, updates: Dict[str, str]) -> Tuple[bool, str]:
+        """Modify a patient's archive (B0101 ACTION=2).
+
+        Loads the edit form, applies *updates*, and submits.
+        Typical use: ``modify_archive(pid, {"SFZH": "...", "CSRQ": "..."})``
+
+        Returns (success, message).
+        """
+        ok, fields, err = self.load_archive(person_id)
+        if not ok:
+            return False, "加载档案失败: %s" % err
+
+        fields.update(updates)
+        fields["ACTION"] = "2"
+        if not fields.get("GUID"):
+            fields["GUID"] = person_id
+
+        for key in ("btnSave", "btnReset", "btn1", "btn2"):
+            fields.pop(key, None)
+
+        try:
+            import json as _json
+            resp = self.session.post(
+                self._url("/Sys_JCWS/B0101/Do_B0101_Handler.ashx"),
+                data=fields,
+                headers=self._csrf_header(),
+                timeout=self._timeout,
+            )
+            if resp.status_code != 200:
+                return False, "提交失败 HTTP %d" % resp.status_code
+
+            text = resp.text.strip()
+            try:
+                obj = _json.loads(text)
+                if obj.get("opType") == 0:
+                    return True, "修改成功"
+                return False, obj.get("msg", "修改失败: opType=%s" % obj.get("opType"))
+            except Exception:
+                if "成功" in text or text == "0":
+                    return True, "修改成功"
+                if len(text) < 200:
+                    return False, "修改失败: %s" % text
+                return False, "修改失败(未知响应)"
+
+        except Exception as e:
+            return False, "修改异常: %s" % str(e)
+
     # ---- 完整签约 (发起+确认) ----
 
     def sign_one(

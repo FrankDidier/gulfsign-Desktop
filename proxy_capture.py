@@ -55,6 +55,18 @@ OPENID_HEADER_PATTERN = re.compile(
     rb'^openId:\s*(@?[a-zA-Z0-9_-]{15,})', re.MULTILINE
 )
 
+WECHATCODE_URL_PATTERN = re.compile(
+    rb'wechatCode\.aspx\?wechatCode=([A-Fa-f0-9]{20,})', re.IGNORECASE
+)
+
+WECHATCODE_COOKIE_PATTERN = re.compile(
+    rb'Set-Cookie:\s*Wechatcode=([A-Fa-f0-9]{20,})', re.IGNORECASE
+)
+
+WECHATCODE_REDIRECT_PATTERN = re.compile(
+    rb'Wechat_code=([A-Fa-f0-9]{20,})', re.IGNORECASE
+)
+
 
 def get_local_ip() -> str:
     try:
@@ -397,14 +409,17 @@ class OpenIDProxy:
         port: int = 8888,
         on_openid: Optional[Callable] = None,
         on_log: Optional[Callable] = None,
+        on_wechatcode: Optional[Callable] = None,
     ):
         self.port = port
         self.on_openid = on_openid
         self.on_log = on_log
+        self.on_wechatcode = on_wechatcode
         self._running = False
         self._server_socket = None
         self._thread = None
         self._found_openids: Set[str] = set()
+        self._found_wechatcodes: Set[str] = set()
         self._traffic_log_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -824,6 +839,13 @@ h1{color:#333;font-size:22px}
                 except Exception:
                     return
 
+    def _report_wechatcode(self, code: str, source: str = ""):
+        if code not in self._found_wechatcodes:
+            self._found_wechatcodes.add(code)
+            self._log("★ 发现 Wechatcode: %s (来源: %s)" % (code[:16] + "...", source), "ok")
+            if self.on_wechatcode:
+                self.on_wechatcode(code)
+
     def _scan_for_openid(self, data: bytes):
         for m in OPENID_PATTERN.finditer(data):
             openid = m.group(1).decode("utf-8", errors="replace")
@@ -837,3 +859,13 @@ h1{color:#333;font-size:22px}
             openid = m.group(1).decode("utf-8", errors="replace")
             if len(openid) >= 15:
                 self._report_openid(openid, "header")
+
+        for m in WECHATCODE_URL_PATTERN.finditer(data):
+            code = m.group(1).decode("utf-8", errors="replace")
+            self._report_wechatcode(code, "url")
+        for m in WECHATCODE_COOKIE_PATTERN.finditer(data):
+            code = m.group(1).decode("utf-8", errors="replace")
+            self._report_wechatcode(code, "cookie")
+        for m in WECHATCODE_REDIRECT_PATTERN.finditer(data):
+            code = m.group(1).decode("utf-8", errors="replace")
+            self._report_wechatcode(code, "redirect")

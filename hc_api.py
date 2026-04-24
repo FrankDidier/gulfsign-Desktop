@@ -73,6 +73,10 @@ class HCContract:
     def is_pending(self) -> bool:
         return self.status == "5"
 
+    @property
+    def is_confirmable(self) -> bool:
+        return self.status in ("5", "6")
+
 
 @dataclass
 class HCConfirmResult:
@@ -277,7 +281,7 @@ class HealthCardClient:
                 params={
                     "action": "editqr",
                     "guid": contract.guid,
-                    "b0105_13": "5",
+                    "b0105_13": contract.status or "5",
                     "status": "1",
                     "personid": contract.person_id,
                     "openid": self.openid,
@@ -308,6 +312,237 @@ class HealthCardClient:
                 health_card_id=contract.health_card_id,
                 error=str(e), elapsed=time.time() - t0,
             )
+
+    # ---- 居民申请签约 (insertJtysqy) ----
+
+    def get_person_guid(self, health_card_id: str) -> Optional[str]:
+        """Get the hex GUID (personId) for a patient from their healthCardId."""
+        info = self.query_signing_info(health_card_id)
+        if info:
+            return info.get("GUID", "")
+        return None
+
+    def query_teams(self, orgcode: str) -> List[dict]:
+        """List signing teams for an org via querygroup."""
+        if not self.connected:
+            return []
+        try:
+            r = self.session.get(
+                self._jkxb_url(),
+                params={"action": "querygroup", "orgcode": orgcode},
+                headers=self._jkxb_headers(),
+                timeout=self._timeout,
+            )
+            data = r.json()
+            if data.get("errno") == 0:
+                return data.get("data", [])
+            return []
+        except Exception as e:
+            logger.error("查询团队异常: %s", e)
+            return []
+
+    def query_service_packages(
+        self, orgcode: str, population_type: str = ""
+    ) -> List[dict]:
+        """List service packages for an org via queryservicepackge."""
+        if not self.connected:
+            return []
+        try:
+            params = {
+                "action": "queryservicepackge",
+                "orgcode": orgcode,
+                "b0110_02": "1",
+            }
+            if population_type:
+                params["b0110_07"] = population_type
+            r = self.session.get(
+                self._jkxb_url(), params=params,
+                headers=self._jkxb_headers(), timeout=self._timeout,
+            )
+            data = r.json()
+            if data.get("errno") == 0:
+                return data.get("data", [])
+            return []
+        except Exception as e:
+            logger.error("查询服务包异常: %s", e)
+            return []
+
+    def create_resident_contract(
+        self,
+        person_id: str,
+        health_card_id: str,
+        name: str,
+        gender: str,
+        phone: str,
+        orgcode: str,
+        team_name: str,
+        team_guid: str,
+        doctor_name: str,
+        package_names: str,
+        package_guids: str,
+        start_date: str,
+        end_date: str,
+        period_years: str = "3",
+    ) -> Tuple[bool, str]:
+        """Create a '居民申请' (status=6) contract via insertJtysqy.
+
+        Dates must be YYYYMMDD format. Returns (success, message).
+        """
+        if not self.connected:
+            return False, "未连接健康卡平台"
+
+        form_data = {
+            "ACTION": (None, "insertJtysqy"),
+            "orgcode": (None, orgcode),
+            "personid": (None, person_id),
+            "xm": (None, name),
+            "xb": (None, gender),
+            "b0105_01": (None, "2"),
+            "b0105_02": (None, phone),
+            "b0105_03": (None, team_name),
+            "b0105_03_guid": (None, team_guid),
+            "b0105_04": (None, doctor_name),
+            "b0105_05": (None, start_date),
+            "b0105_06": (None, package_names),
+            "b0105_06_guid": (None, package_guids),
+            "b0105_08": (None, period_years),
+            "b0105_07": (None, start_date),
+            "b0105_09": (None, end_date),
+            "b0105_10": (None, "0"),
+            "b0105_11": (None, "0"),
+            "b0105_12": (None, "0"),
+            "b0105_13": (None, "6"),
+            "openid": (None, self.openid),
+            "healthCardId": (None, health_card_id),
+        }
+
+        try:
+            r = self.session.post(
+                "%s?token=%s" % (self._jkxb_url(), self.jwt_token),
+                files=form_data,
+                headers={
+                    "token": self.jwt_token,
+                    "Origin": "https://jkkgzh.hnhfpc.gov.cn",
+                    "Referer": "https://jkkgzh.hnhfpc.gov.cn/",
+                },
+                timeout=self._timeout,
+            )
+            data = r.json()
+            if data.get("errno") == 0:
+                return True, "居民申请创建成功"
+            return False, data.get("message", "创建失败")
+        except Exception as e:
+            return False, "创建异常: %s" % str(e)
+
+    def delete_contract(self, contract_guid: str, orgcode: str) -> Tuple[bool, str]:
+        """Delete a pending contract via deletejtysqy."""
+        if not self.connected:
+            return False, "未连接"
+        try:
+            r = self.session.post(
+                self._jkxb_url(),
+                data={"ACTION": "deletejtysqy", "guid": contract_guid,
+                      "orgcode": orgcode},
+                headers=self._jkxb_headers(),
+                timeout=self._timeout,
+            )
+            data = r.json()
+            if data.get("errno") == 0:
+                return True, "删除成功"
+            return False, data.get("message", "删除失败")
+        except Exception as e:
+            return False, str(e)
+
+    # ---- 健康卡注册 ----
+
+    def register_health_card(
+        self,
+        wechatcode: str,
+        id_card: str,
+        name: str,
+        phone: str = "",
+        nation: str = "01",
+        relation: str = "本人",
+        verify_result: str = "",
+        order_id: str = "",
+    ) -> Tuple[bool, str]:
+        """Register a new health card via jkkzc registration API.
+
+        Requires a valid Wechatcode from the WeChat OAuth flow.
+        For ages <18 or >=60, verifyResult can be empty (no face needed).
+        Returns (success, message).
+        """
+        if not self.openid:
+            return False, "OpenID未设置"
+
+        try:
+            r = requests.post(
+                "https://jkkzc.hnhfpc.gov.cn/gzc/Wx_jmjkk/Handler.ashx?action=test",
+                data={
+                    "Openid": self.openid,
+                    "idCard": id_card,
+                    "name": name,
+                    "nation": nation,
+                    "relation": relation,
+                    "phone": phone or "13800000000",
+                    "verifyResult": verify_result,
+                    "orderId": order_id,
+                },
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                  "AppleWebKit/537.36 MicroMessenger/7.0.20",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Wechatcode": wechatcode,
+                    "Referer": "https://jkkzc.hnhfpc.gov.cn/gzc/Wx_jmjkk/"
+                               "regist.html?Wechat_code=%s" % wechatcode,
+                },
+                cookies={
+                    "token": self.jwt_token,
+                    "Wechatcode": wechatcode,
+                },
+                verify=False,
+                timeout=15,
+            )
+            body = r.text.strip()
+            if body == "{}":
+                return False, "注册失败(Wechatcode可能已过期或人脸验证被拒)"
+            if not body:
+                return False, "注册失败(空响应)"
+            try:
+                data = json.loads(body)
+                if data.get("errno") == 0 or data.get("success"):
+                    return True, "健康卡注册成功"
+                return True, "注册已提交: %s" % body[:120]
+            except json.JSONDecodeError:
+                if len(body) > 10:
+                    return True, "注册已提交(非JSON响应)"
+                return False, "注册失败: %s" % body[:120]
+        except Exception as e:
+            return False, "注册异常: %s" % str(e)
+
+    def unbind_health_card(self, health_card_id: str) -> Tuple[bool, str]:
+        """Unbind a health card via cancelunbind."""
+        if not self.connected:
+            return False, "未连接"
+        try:
+            r = self.session.get(
+                "%s/httpapi/jkdaservice.ashx" % self.base_url,
+                params={
+                    "ACTION": "cancelunbind",
+                    "healthCardId": health_card_id,
+                    "token": self.jwt_token,
+                },
+                headers=self._jkxb_headers(),
+                timeout=self._timeout,
+            )
+            data = r.json()
+            if data.get("errno") == 0:
+                return True, "解绑成功"
+            return False, data.get("message", "解绑失败")
+        except Exception as e:
+            return False, str(e)
+
+    # ---- 原有流程 ----
 
     def process_card(
         self,
@@ -342,16 +577,16 @@ class HealthCardClient:
         status = info.get("CONTRACT_STATES", "")
         orgcode = info.get("gdjgcode", "")
 
-        if str(status) != "5":
+        if str(status) not in ("5", "6"):
             status_names = {
                 "0": "已签约", "1": "未签约",
-                "5": "医生申请(待确认)", "6": "居民申请",
+                "5": "医生申请(待确认)", "6": "居民申请(待确认)",
             }
             log("  状态: %s (非待确认)" % status_names.get(str(status), status), "warn")
             return None
 
         contracts = self.query_contracts(person_id, card.health_card_id)
-        pending = [c for c in contracts if c.is_pending]
+        pending = [c for c in contracts if c.is_confirmable]
 
         if not pending:
             log("  无待确认合同", "warn")

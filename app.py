@@ -20,6 +20,11 @@ if getattr(sys, "frozen", False):
 
 from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
+from sign_engine import (
+    SigningEngine, FullSignResult,
+    get_age_from_id, needs_age_bypass,
+    validate_id_card, generate_bypass_sfzh,
+)
 from proxy_capture import (
     OpenIDProxy, get_local_ip,
     set_windows_proxy, clear_windows_proxy,
@@ -27,7 +32,7 @@ from proxy_capture import (
     set_system_proxy, clear_system_proxy, install_ca_to_system,
 )
 
-VERSION = "2.1.0"
+VERSION = "3.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
 CONFIG_FILE = "gulfsign_config.json"
 
@@ -67,6 +72,7 @@ class GulfSignApp(tk.Tk):
 
         self.client = PH3Client()
         self.hc_client = HealthCardClient()
+        self.sign_engine = SigningEngine(self.hc_client, self.client)
         self.patients: List[Patient] = []
         self.selected_ids: set = set()
 
@@ -451,6 +457,7 @@ class GulfSignApp(tk.Tk):
     def _build_hc_tab(self, parent):
         self._build_hc_workflow_guide(parent)
         self._build_hc_connect(parent)
+        self._build_hc_signing_config(parent)
         self._build_hc_card_table(parent)
         self._build_hc_control(parent)
         self._build_hc_log(parent)
@@ -461,9 +468,9 @@ class GulfSignApp(tk.Tk):
 
         guide = (
             "① 微信小程序\"我的健康卡\" → 添加家庭成员 → 绑定签约对象（输入姓名+身份证号）\n"
-            "② 本软件点击「刷新卡列表」→ 看到绑定的卡 → 点击「一键确认签约」\n"
-            "③ 确认完成后 → 微信小程序\"我的健康卡\" → 解绑已确认的卡\n"
-            "④ 继续绑定下一批 → 重复以上步骤（每个OpenID最多同时绑9张卡）"
+            "② 本软件点击「刷新卡列表」→ 看到绑定的卡 → 点击「一键全流程签约」\n"
+            "③ 自动流程: 绕过人脸 → 查询状态 → 创建合同 → 确认签约 (全自动)\n"
+            "④ 完成后解绑已签约的卡 → 继续绑定下一批 → 重复以上步骤"
         )
 
         try:
@@ -514,6 +521,137 @@ class GulfSignApp(tk.Tk):
             foreground="gray",
         ).pack(side=tk.RIGHT)
 
+    def _build_hc_signing_config(self, parent):
+        frame = ttk.LabelFrame(parent, text=" 签约配置 ", padding=6)
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        r0 = ttk.Frame(frame)
+        r0.pack(fill=tk.X)
+
+        ttk.Label(r0, text="机构代码:").pack(side=tk.LEFT)
+        self.var_hc_orgcode = tk.StringVar()
+        ttk.Entry(r0, textvariable=self.var_hc_orgcode, width=20).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+
+        ttk.Label(r0, text="签约团队:").pack(side=tk.LEFT)
+        self.var_hc_team = tk.StringVar()
+        ttk.Entry(r0, textvariable=self.var_hc_team, width=16).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+
+        ttk.Label(r0, text="签约医生:").pack(side=tk.LEFT)
+        self.var_hc_doctor = tk.StringVar()
+        ttk.Entry(r0, textvariable=self.var_hc_doctor, width=10).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+
+        r1 = ttk.Frame(frame)
+        r1.pack(fill=tk.X, pady=(4, 0))
+
+        ttk.Label(r1, text="协议开始:").pack(side=tk.LEFT)
+        self.var_hc_start = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_hc_start, width=10).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+
+        ttk.Label(r1, text="协议结束:").pack(side=tk.LEFT)
+        self.var_hc_end = tk.StringVar()
+        ttk.Entry(r1, textvariable=self.var_hc_end, width=10).pack(
+            side=tk.LEFT, padx=(4, 8)
+        )
+
+        ttk.Label(r1, text="(如 20260101 ~ 20291231, 留空=自动3年)").pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+
+        self.var_hc_auto_create = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            r1, text="自动创建合同(未签约居民)",
+            variable=self.var_hc_auto_create,
+        ).pack(side=tk.RIGHT)
+
+        r2 = ttk.Frame(frame)
+        r2.pack(fill=tk.X, pady=(4, 0))
+
+        self.btn_hc_sync_from_ph3 = ttk.Button(
+            r2, text="从3.0系统同步配置",
+            command=self._on_hc_sync_from_ph3,
+        )
+        self.btn_hc_sync_from_ph3.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Label(
+            r2,
+            text="(登录3.0系统后可一键同步机构代码、医生、团队信息)",
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+
+    def _on_hc_sync_from_ph3(self):
+        """Sync signing config from the logged-in 3.0 system."""
+        if not self.client.logged_in:
+            messagebox.showwarning("提示", "请先在「3.0系统签约」页面登录")
+            return
+
+        self.btn_hc_sync_from_ph3.configure(state=tk.DISABLED)
+        self._hc_log("正在从3.0系统同步配置...", "info")
+
+        def worker():
+            synced = []
+            orgcode = self.client.org_code
+            if orgcode:
+                synced.append("机构代码(%s)" % orgcode)
+            if self.client.doctor_name:
+                synced.append("医生(%s)" % self.client.doctor_name)
+
+            team_guid, team_name = "", ""
+            try:
+                teams = self.sign_engine._teams_from_ph3()
+                if teams:
+                    first = teams[0]
+                    team_guid = first.get("id", first.get("guid", ""))
+                    team_name = first.get("name", "")
+                    synced.append("团队(%s)" % team_name)
+                    self.after(0, lambda tn=team_name: self.var_hc_team.set(tn))
+            except Exception as e:
+                self.after(0, lambda: self._hc_log(
+                    "团队查询失败: %s" % e, "warn"
+                ))
+
+            pkg_guids, pkg_names = "", ""
+            try:
+                pkg_guids, pkg_names = self.client._load_service_packs("0")
+                if pkg_guids:
+                    synced.append("服务包(%d个)" % len(pkg_guids.split(",")))
+            except Exception as e:
+                self.after(0, lambda: self._hc_log(
+                    "服务包查询失败: %s" % e, "warn"
+                ))
+
+            def done():
+                self.btn_hc_sync_from_ph3.configure(state=tk.NORMAL)
+                if orgcode:
+                    self.var_hc_orgcode.set(orgcode)
+                if self.client.doctor_name:
+                    self.var_hc_doctor.set(self.client.doctor_name)
+
+                self.sign_engine._cached_teams[orgcode] = (
+                    [{"id": team_guid, "name": team_name}] if team_guid else []
+                )
+                if pkg_guids:
+                    self.sign_engine._cached_packages["%s|" % orgcode] = (
+                        pkg_guids, pkg_names,
+                    )
+
+                if synced:
+                    self._hc_log("已同步: %s" % ", ".join(synced), "ok")
+                else:
+                    self._hc_log("3.0系统无可同步信息", "warn")
+                self._save_current_config()
+
+            self.after(0, done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _build_hc_card_table(self, parent):
         frame = ttk.LabelFrame(parent, text=" 健康卡列表 ", padding=4)
         frame.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
@@ -539,23 +677,24 @@ class GulfSignApp(tk.Tk):
 
         cols = (
             "seq", "name", "id_card", "age", "category",
-            "gender", "rpc_status", "relation",
+            "gender", "rpc_status", "bypass", "relation",
         )
         col_names = {
             "seq": "#", "name": "姓名", "id_card": "身份证号",
             "age": "年龄", "category": "人群分类",
             "gender": "性别", "rpc_status": "人脸认证",
-            "relation": "关系",
+            "bypass": "需绕行", "relation": "关系",
         }
         col_widths = {
             "seq": 35, "name": 80, "id_card": 170, "age": 45,
             "category": 70, "gender": 45, "rpc_status": 80,
-            "relation": 50,
+            "bypass": 55, "relation": 50,
         }
         col_anchors = {
             "seq": "center", "name": "center", "age": "center",
             "category": "center", "gender": "center",
-            "rpc_status": "center", "relation": "center",
+            "rpc_status": "center", "bypass": "center",
+            "relation": "center",
         }
 
         tree_frame = ttk.Frame(frame)
@@ -587,14 +726,14 @@ class GulfSignApp(tk.Tk):
         self.hc_tree.tag_configure("skipped", background="#fef9c3")
 
     def _build_hc_control(self, parent):
-        frame = ttk.LabelFrame(parent, text=" 批量确认 ", padding=6)
+        frame = ttk.LabelFrame(parent, text=" 批量签约 ", padding=6)
         frame.pack(fill=tk.X, pady=(0, 4))
 
         r0 = ttk.Frame(frame)
         r0.pack(fill=tk.X)
 
         self.btn_hc_confirm = ttk.Button(
-            r0, text="▶ 一键确认签约", command=self._on_hc_start_confirm,
+            r0, text="▶ 一键全流程签约", command=self._on_hc_start_confirm,
         )
         self.btn_hc_confirm.pack(side=tk.LEFT, padx=(0, 8))
 
@@ -618,7 +757,7 @@ class GulfSignApp(tk.Tk):
         r1.pack(fill=tk.X, pady=(4, 0))
         ttk.Label(
             r1,
-            text="自动流程: 设置人脸认证 → 查询签约状态 → 确认待确认合同  |  只处理3.0系统\"医生申请\"(状态5)的签约",
+            text="全自动: 绕过人脸 → 查询状态 → 创建合同(可选) → 确认签约  |  支持状态5(医生申请) + 状态6(居民申请) + 未签约",
             foreground="gray",
         ).pack(side=tk.LEFT)
 
@@ -1337,6 +1476,16 @@ class GulfSignApp(tk.Tk):
             self.var_max_count.set(c["max_count"])
         if c.get("hc_openid"):
             self.var_hc_openid.set(c["hc_openid"])
+        if c.get("hc_orgcode"):
+            self.var_hc_orgcode.set(c["hc_orgcode"])
+        if c.get("hc_team"):
+            self.var_hc_team.set(c["hc_team"])
+        if c.get("hc_doctor"):
+            self.var_hc_doctor.set(c["hc_doctor"])
+        if c.get("hc_start"):
+            self.var_hc_start.set(c["hc_start"])
+        if c.get("hc_end"):
+            self.var_hc_end.set(c["hc_end"])
 
     def _save_current_config(self):
         save_config({
@@ -1351,6 +1500,11 @@ class GulfSignApp(tk.Tk):
             "agree_end": self.var_agree_end.get(),
             "max_count": self.var_max_count.get(),
             "hc_openid": self.var_hc_openid.get(),
+            "hc_orgcode": self.var_hc_orgcode.get(),
+            "hc_team": self.var_hc_team.get(),
+            "hc_doctor": self.var_hc_doctor.get(),
+            "hc_start": self.var_hc_start.get(),
+            "hc_end": self.var_hc_end.get(),
         })
 
     # ================================================================
@@ -1909,10 +2063,18 @@ class GulfSignApp(tk.Tk):
 
             gender_map = {"1": "男", "2": "女"}
             rpc_text = "已认证" if c.is_verified else "未认证"
+            if "*" in (c.id_card or ""):
+                try:
+                    bypass_text = "是" if needs_age_bypass(int(c.age)) else ""
+                except (ValueError, TypeError):
+                    bypass_text = ""
+            else:
+                bypass_text = "是" if needs_age_bypass(c.id_card) else ""
 
             self.hc_tree.insert("", tk.END, iid=c.health_card_id, values=(
                 i, c.name, c.id_card, c.age, c.age_category,
-                gender_map.get(c.gender, c.gender), rpc_text, c.relation,
+                gender_map.get(c.gender, c.gender), rpc_text,
+                bypass_text, c.relation,
             ), tags=tags)
 
         verified = sum(1 for c in self._hc_cards if c.is_verified)
@@ -1969,8 +2131,29 @@ class GulfSignApp(tk.Tk):
             messagebox.showwarning("提示", "请选择要处理的健康卡")
             return
 
-        msg = "即将对 %d 张健康卡执行自动确认签约：\n\n" % len(targets)
-        msg += "流程: 设置人脸认证 → 查询签约 → 确认待确认合同\n\n"
+        orgcode = self.var_hc_orgcode.get().strip()
+        auto_create = self.var_hc_auto_create.get()
+        if auto_create and not orgcode:
+            messagebox.showwarning(
+                "提示",
+                "自动创建合同需要填写「机构代码」。\n\n"
+                "可在3.0系统登录后点击「从3.0系统同步配置」获取，\n"
+                "或取消勾选「自动创建合同」仅确认已有的待确认合同。",
+            )
+            return
+
+        flow_desc = "全流程签约" if auto_create else "确认已有合同"
+        msg = "即将对 %d 张健康卡执行「%s」：\n\n" % (len(targets), flow_desc)
+        msg += "流程: 绕过人脸 → 查询状态 → "
+        if auto_create:
+            msg += "创建合同 → "
+        msg += "确认签约\n\n"
+        if auto_create:
+            msg += "机构: %s\n医生: %s\n团队: %s\n\n" % (
+                orgcode or "(未设置)",
+                self.var_hc_doctor.get().strip() or "(自动)",
+                self.var_hc_team.get().strip() or "(自动)",
+            )
         msg += "是否继续？"
         if not messagebox.askyesno("确认操作", msg):
             return
@@ -1988,17 +2171,29 @@ class GulfSignApp(tk.Tk):
         self.var_hc_stats.set("")
 
         self._hc_log("=" * 50, "info")
-        self._hc_log("开始批量确认: %d 张卡" % len(targets), "info")
+        self._hc_log("开始批量签约: %d 张卡 (%s)" % (len(targets), flow_desc), "info")
+
+        self._save_current_config()
+
+        sign_config = {
+            "orgcode": orgcode,
+            "team_name": self.var_hc_team.get().strip(),
+            "doctor_name": self.var_hc_doctor.get().strip(),
+            "start_date": self.var_hc_start.get().strip(),
+            "end_date": self.var_hc_end.get().strip(),
+            "auto_create": auto_create,
+        }
 
         def worker():
-            self._hc_confirm_worker(targets)
+            self._hc_confirm_worker(targets, sign_config)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _hc_confirm_worker(self, targets: List[HealthCard]):
+    def _hc_confirm_worker(self, targets: List[HealthCard], config: dict):
         success = 0
         fail = 0
         skipped = 0
+        created = 0
         t0 = time.time()
 
         for i, card in enumerate(targets):
@@ -2010,44 +2205,59 @@ class GulfSignApp(tk.Tk):
                 0,
                 lambda idx=i, c=card: self._hc_log(
                     "处理 [%d/%d] %s (%s, %s)" % (
-                        idx + 1, len(targets), c.name, c.age_category or "?", c.id_card
+                        idx + 1, len(targets), c.name,
+                        c.age_category or "?", c.id_card,
                     ),
                     "info",
                 ),
             )
 
-            result = self.hc_client.process_card(
+            result = self.sign_engine.process_card_full(
                 card,
+                orgcode=config["orgcode"],
+                team_name=config.get("team_name", ""),
+                doctor_name=config.get("doctor_name", ""),
+                start_date=config.get("start_date", ""),
+                end_date=config.get("end_date", ""),
+                auto_create=config.get("auto_create", True),
                 log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
             )
 
-            if result is None:
+            if result.step == "already_signed":
                 tag = "skipped"
                 skipped += 1
             elif result.success:
                 tag = "confirm_ok"
                 success += 1
+                if result.contract_created:
+                    created += 1
             else:
                 tag = "confirm_fail"
                 fail += 1
 
-            def _update_row(idx=i, t=tag, s=success, f=fail, sk=skipped):
+            def _update_row(
+                idx=i, t=tag, s=success, f=fail, sk=skipped, cr=created,
+            ):
                 hcid = targets[idx].health_card_id
                 children = self.hc_tree.get_children()
                 if hcid in children:
                     self.hc_tree.item(hcid, tags=(t,))
                 self.hc_progress.configure(value=idx + 1)
-                self.var_hc_progress_text.set("%d / %d" % (idx + 1, len(targets)))
+                self.var_hc_progress_text.set(
+                    "%d / %d" % (idx + 1, len(targets))
+                )
                 elapsed = time.time() - t0
                 speed = elapsed / (idx + 1)
                 self.var_hc_stats.set(
-                    "确认: %d  失败: %d  跳过: %d  速度: %.1f秒/人" % (s, f, sk, speed)
+                    "签约: %d  新建: %d  失败: %d  跳过: %d  %.1f秒/人" % (
+                        s, cr, f, sk, speed,
+                    )
                 )
 
             self.after(0, _update_row)
             time.sleep(0.3)
 
-        def _done(s=success, f=fail, sk=skipped):
+        def _done(s=success, f=fail, sk=skipped, cr=created):
             self._hc_confirming = False
             self.btn_hc_confirm.configure(state=tk.NORMAL)
             self.btn_hc_stop.configure(state=tk.DISABLED)
@@ -2058,8 +2268,8 @@ class GulfSignApp(tk.Tk):
             elapsed = time.time() - t0
             self._hc_log("=" * 50, "info")
             self._hc_log(
-                "确认完成! 成功: %d, 失败: %d, 跳过: %d, 耗时: %.1f秒" % (
-                    s, f, sk, elapsed
+                "签约完成! 成功: %d (新建: %d), 失败: %d, 跳过: %d, 耗时: %.1f秒" % (
+                    s, cr, f, sk, elapsed,
                 ),
                 "ok" if f == 0 else "warn",
             )
