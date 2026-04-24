@@ -243,7 +243,7 @@ class SigningEngine:
         """Load service packages from the 3.0 system (fallback)."""
         if not self.ph3 or not self.ph3.logged_in:
             return "", ""
-        return self.ph3._load_service_packs(fwlx)
+        return self.ph3._load_service_packs(fwlx or "0")
 
     # ================================================================
     # Full signing flow
@@ -346,6 +346,24 @@ class SigningEngine:
             )
 
         if status == "1" or not status:
+            contracts = self.hc.query_contracts(person_id, card.health_card_id)
+            signed = [c for c in contracts if c.status == "0"]
+            confirmable = [c for c in contracts if c.status in ("5", "6")]
+
+            if confirmable:
+                log("  发现 %d 份待确认合同" % len(confirmable), "info")
+                return self._confirm_existing(
+                    card, person_id, info_orgcode, confirmable[0].status,
+                    result, t0, log,
+                )
+
+            if signed:
+                result.success = True
+                result.step = "already_signed"
+                result.elapsed = time.time() - t0
+                log("  该居民在其他机构已有签约合同，跳过", "warn")
+                return result
+
             if not auto_create:
                 result.error = "未签约，且未启用自动创建"
                 result.step = "query"

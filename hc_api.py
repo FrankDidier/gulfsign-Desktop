@@ -430,7 +430,11 @@ class HealthCardClient:
             data = r.json()
             if data.get("errno") == 0:
                 return True, "居民申请创建成功"
-            return False, data.get("message", "创建失败")
+            detail = data.get("data", "")
+            msg = data.get("message", "创建失败")
+            if detail and isinstance(detail, str) and detail != msg:
+                msg = "%s (%s)" % (msg, detail.strip())
+            return False, msg
         except Exception as e:
             return False, "创建异常: %s" % str(e)
 
