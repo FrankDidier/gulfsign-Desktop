@@ -11,14 +11,14 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 if getattr(sys, "frozen", False):
     _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     if _bundle_dir not in sys.path:
         sys.path.insert(0, _bundle_dir)
 
-from ph3_api import PH3Client, Patient, SignResult, POPULATION_TYPES
+from ph3_api import PH3Client, Patient, ProvinceMatch, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
 from sign_engine import (
     SigningEngine, FullSignResult,
@@ -59,6 +59,451 @@ def save_config(cfg: dict):
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+_HJDZ_PRESETS = [
+    ("湖南省 (全省)", "430000000000"),
+    ("长沙市", "430100000000"),
+    ("株洲市", "430200000000"),
+    ("湘潭市", "430300000000"),
+    ("衡阳市", "430400000000"),
+    ("邵阳市", "430500000000"),
+    ("岳阳市", "430600000000"),
+    ("常德市", "430700000000"),
+    ("张家界市", "430800000000"),
+    ("益阳市", "430900000000"),
+    ("郴州市", "431000000000"),
+    ("永州市", "431100000000"),
+    ("怀化市", "431200000000"),
+    ("娄底市", "431300000000"),
+    ("湘西州", "433100000000"),
+]
+
+
+class ProvinceLookupDialog(tk.Toplevel):
+    """全省个案查询 + 跨机构发起医生申请的对话框。"""
+
+    def __init__(self, master: "GulfSignApp"):
+        super().__init__(master)
+        self.app = master
+        self.client = master.client
+        self.matches: List[ProvinceMatch] = []
+        self._busy = False
+
+        self.title("全省找人 / 跨机构发起签约")
+        self.geometry("1000x620")
+        self.transient(master)
+        self.minsize(900, 560)
+
+        cfg = master._cfg
+        self.var_sfzh = tk.StringVar()
+        self.var_xm = tk.StringVar()
+        self.var_pwd = tk.StringVar(value=cfg.get("province_password", ""))
+        self.var_remember_pwd = tk.BooleanVar(
+            value=bool(cfg.get("province_password"))
+        )
+        self.var_hjdz = tk.StringVar(
+            value=cfg.get("province_hjdz", _HJDZ_PRESETS[0][1])
+        )
+        self.var_exclude = tk.BooleanVar(value=False)
+        self.var_status = tk.StringVar(value="提示：身份证号或姓名至少填一项")
+
+        self._build_ui()
+        self._update_action_buttons()
+
+    # --- UI ---
+
+    def _build_ui(self):
+        pad = ttk.Frame(self, padding=10)
+        pad.pack(fill=tk.BOTH, expand=True)
+
+        guide = ttk.LabelFrame(pad, text=" 说明 ", padding=6)
+        guide.pack(fill=tk.X, pady=(0, 6))
+        guide_text = (
+            "本工具调用 3.0 系统「全省个案查询」(ACTION=10)，"
+            "可越过本机构边界定位任何湖南省内的居民档案。\n"
+            "命中后可一键「跨机构发起医生申请」(STATUS=5)，"
+            "供居民户籍地的责任医生确认；或先「填入查询条件」回主界面继续操作。\n"
+            "注意：身份证号查询可全省 (430000000000)；姓名查询时户籍地必须细化到地市级。"
+        )
+        try:
+            bg = self.cget("background")
+        except Exception:
+            bg = "#f0f0f0"
+        tw = tk.Text(
+            guide, height=4, wrap=tk.WORD, state=tk.NORMAL,
+            font=("", 10), relief=tk.FLAT, background=bg,
+        )
+        tw.insert("1.0", guide_text)
+        tw.configure(state=tk.DISABLED)
+        tw.pack(fill=tk.X)
+
+        form = ttk.LabelFrame(pad, text=" 查询条件 ", padding=6)
+        form.pack(fill=tk.X, pady=(0, 6))
+
+        r0 = ttk.Frame(form)
+        r0.pack(fill=tk.X)
+        ttk.Label(r0, text="身份证号:").pack(side=tk.LEFT)
+        ttk.Entry(r0, textvariable=self.var_sfzh, width=22).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+        ttk.Label(r0, text="姓名:").pack(side=tk.LEFT)
+        ttk.Entry(r0, textvariable=self.var_xm, width=10).pack(
+            side=tk.LEFT, padx=(4, 12)
+        )
+        ttk.Label(r0, text="户籍地范围:").pack(side=tk.LEFT)
+        cb = ttk.Combobox(
+            r0, width=18, state="readonly",
+            values=[label for label, _ in _HJDZ_PRESETS],
+        )
+        for label, code in _HJDZ_PRESETS:
+            if code == self.var_hjdz.get():
+                cb.set(label)
+                break
+        else:
+            cb.set(_HJDZ_PRESETS[0][0])
+
+        def _on_hjdz_change(_evt=None):
+            for label, code in _HJDZ_PRESETS:
+                if label == cb.get():
+                    self.var_hjdz.set(code)
+                    return
+        cb.bind("<<ComboboxSelected>>", _on_hjdz_change)
+        cb.pack(side=tk.LEFT, padx=(4, 12))
+        ttk.Checkbutton(
+            r0, text="排除注销人口", variable=self.var_exclude,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        r1 = ttk.Frame(form)
+        r1.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(r1, text="登录密码:").pack(side=tk.LEFT)
+        ttk.Entry(
+            r1, textvariable=self.var_pwd, width=18, show="*",
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        ttk.Label(
+            r1, text="(全省查档需要再输一次当前账号密码作为安全码)",
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            r1, text="记住密码", variable=self.var_remember_pwd,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        r2 = ttk.Frame(form)
+        r2.pack(fill=tk.X, pady=(6, 0))
+        self.btn_search = ttk.Button(
+            r2, text="🔍 查询", command=self._on_search,
+        )
+        self.btn_search.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(r2, textvariable=self.var_status, style="Info.TLabel").pack(
+            side=tk.LEFT
+        )
+
+        # 结果表
+        table_frame = ttk.LabelFrame(pad, text=" 命中结果 ", padding=4)
+        table_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+
+        cols = (
+            "name", "id_card", "age", "gender", "address",
+            "doctor", "archive_no", "realname",
+        )
+        col_names = {
+            "name": "姓名", "id_card": "身份证号", "age": "年龄",
+            "gender": "性别", "address": "户籍地",
+            "doctor": "责任医生", "archive_no": "档案号",
+            "realname": "实名/面访",
+        }
+        col_widths = {
+            "name": 70, "id_card": 150, "age": 40,
+            "gender": 50, "address": 220, "doctor": 80,
+            "archive_no": 130, "realname": 80,
+        }
+
+        tree_wrap = ttk.Frame(table_frame)
+        tree_wrap.pack(fill=tk.BOTH, expand=True)
+        self.tree = ttk.Treeview(
+            tree_wrap, columns=cols, show="headings", selectmode="browse",
+        )
+        for c in cols:
+            self.tree.heading(c, text=col_names[c])
+            self.tree.column(
+                c, width=col_widths.get(c, 80), minwidth=40,
+                anchor=("center" if c in ("age", "gender", "realname") else "w"),
+            )
+        vsb = ttk.Scrollbar(
+            tree_wrap, orient=tk.VERTICAL, command=self.tree.yview,
+        )
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        tree_wrap.grid_rowconfigure(0, weight=1)
+        tree_wrap.grid_columnconfigure(0, weight=1)
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        # 详情区
+        detail_frame = ttk.LabelFrame(pad, text=" 已有家医签约（按选中居民） ", padding=4)
+        detail_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 6))
+
+        d_cols = ("contract_code", "status", "agreement", "doctor")
+        d_names = {
+            "contract_code": "合同编号", "status": "状态",
+            "agreement": "协议期", "doctor": "签约医生",
+        }
+        d_widths = {
+            "contract_code": 280, "status": 80,
+            "agreement": 200, "doctor": 100,
+        }
+        self.detail_tree = ttk.Treeview(
+            detail_frame, columns=d_cols, show="headings",
+            height=4, selectmode="none",
+        )
+        for c in d_cols:
+            self.detail_tree.heading(c, text=d_names[c])
+            self.detail_tree.column(
+                c, width=d_widths.get(c, 100), minwidth=40,
+                anchor=("center" if c == "status" else "w"),
+            )
+        self.detail_tree.pack(fill=tk.BOTH, expand=True)
+
+        # 操作按钮
+        btn_bar = ttk.Frame(pad)
+        btn_bar.pack(fill=tk.X)
+
+        self.btn_apply = ttk.Button(
+            btn_bar, text="↑ 填入主界面查询条件",
+            command=self._on_apply_to_main, state=tk.DISABLED,
+        )
+        self.btn_apply.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_initiate = ttk.Button(
+            btn_bar, text="✦ 跨机构发起医生申请 (STATUS=5)",
+            command=self._on_initiate, state=tk.DISABLED,
+        )
+        self.btn_initiate.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(btn_bar, text="关闭", command=self.destroy).pack(side=tk.RIGHT)
+
+    # --- Logic ---
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        state = tk.DISABLED if busy else tk.NORMAL
+        self.btn_search.configure(state=state)
+        if busy:
+            self.btn_apply.configure(state=tk.DISABLED)
+            self.btn_initiate.configure(state=tk.DISABLED)
+        else:
+            self._update_action_buttons()
+
+    def _selected_match(self) -> Optional[ProvinceMatch]:
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        try:
+            idx = int(sel[0])
+        except ValueError:
+            return None
+        if 0 <= idx < len(self.matches):
+            return self.matches[idx]
+        return None
+
+    def _update_action_buttons(self):
+        if self._busy:
+            return
+        m = self._selected_match()
+        state = tk.NORMAL if m else tk.DISABLED
+        self.btn_apply.configure(state=state)
+        self.btn_initiate.configure(state=state)
+
+    def _on_search(self):
+        if not self.client.logged_in:
+            messagebox.showwarning("提示", "请先在主界面登录 3.0 系统")
+            return
+        sfzh = self.var_sfzh.get().strip()
+        xm = self.var_xm.get().strip()
+        pwd = self.var_pwd.get().strip()
+        if not sfzh and not xm:
+            messagebox.showwarning("提示", "身份证号或姓名至少填一项")
+            return
+        if not pwd:
+            messagebox.showwarning(
+                "提示", "请填写当前账号的登录密码（全省查档安全码）"
+            )
+            return
+        if not sfzh and self.var_hjdz.get() == "430000000000":
+            if not messagebox.askyesno(
+                "提示",
+                "仅按姓名 + 全省范围查询通常会被拒绝。\n\n"
+                "建议把户籍地范围缩到地市级。仍要继续吗？",
+            ):
+                return
+
+        self._set_busy(True)
+        self.var_status.set("正在查询...")
+        if self.var_remember_pwd.get():
+            self.app._cfg["province_password"] = pwd
+        else:
+            self.app._cfg.pop("province_password", None)
+        self.app._cfg["province_hjdz"] = self.var_hjdz.get()
+        save_config(self.app._cfg)
+
+        def worker():
+            matches, total, err = self.client.query_province_wide(
+                sfzh=sfzh,
+                name=xm,
+                hjdz=self.var_hjdz.get() or "430000000000",
+                password=pwd,
+                exclude_cancelled=self.var_exclude.get(),
+            )
+            self.after(0, lambda: self._on_search_done(matches, total, err))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_search_done(
+        self, matches: List[ProvinceMatch], total: int, err: str,
+    ):
+        self._set_busy(False)
+        self.tree.delete(*self.tree.get_children())
+        self.detail_tree.delete(*self.detail_tree.get_children())
+        self.matches = matches
+
+        if err:
+            self.var_status.set("✗ %s" % err)
+            messagebox.showerror("查询失败", err)
+            return
+
+        if not matches:
+            self.var_status.set("查询成功，但没有命中记录")
+            return
+
+        for i, m in enumerate(matches):
+            flags = []
+            if m.is_realname:
+                flags.append("实名")
+            if m.is_visited:
+                flags.append("面访")
+            flags_text = "/".join(flags) if flags else "-"
+            self.tree.insert("", tk.END, iid=str(i), values=(
+                m.name, m.id_card, m.age, m.gender, m.address,
+                m.doctor, m.archive_no, flags_text,
+            ))
+        self.var_status.set("命中 %d 人 (共 %d 条)" % (len(matches), total))
+        self.tree.selection_set("0")
+        self.tree.focus("0")
+        self._on_load_contracts(matches[0])
+
+    def _on_tree_select(self, _evt=None):
+        m = self._selected_match()
+        if m:
+            self._on_load_contracts(m)
+        self._update_action_buttons()
+
+    def _on_load_contracts(self, m: ProvinceMatch):
+        self.detail_tree.delete(*self.detail_tree.get_children())
+
+        def worker():
+            recs = self.client.list_personal_b0105(m.person_id)
+            self.after(0, lambda: self._render_contracts(recs))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_contracts(self, recs: List[Dict]):
+        self.detail_tree.delete(*self.detail_tree.get_children())
+        if not recs:
+            self.detail_tree.insert("", tk.END, values=(
+                "(无家医签约记录)", "", "", "",
+            ))
+            return
+        for r in recs:
+            agreement = "%s ~ %s" % (
+                r.get("agreement_start", "") or "?",
+                r.get("agreement_end", "") or "?",
+            )
+            self.detail_tree.insert("", tk.END, values=(
+                r.get("contract_code", ""),
+                r.get("status_text", ""),
+                agreement,
+                r.get("doctor", ""),
+            ))
+
+    def _on_apply_to_main(self):
+        m = self._selected_match()
+        if not m:
+            return
+        self.app.var_idcard_filter.set(m.id_card or "")
+        self.app.var_name_filter.set(m.name or "")
+        self.app.var_status.set("全部")
+        messagebox.showinfo(
+            "已填入",
+            "已把身份证号 / 姓名填入主界面查询条件。\n\n"
+            "若该居民属于本机构，可点击「查询(首页)」加载并签约。\n"
+            "若属于其他机构，请改用本对话框中的「跨机构发起」。",
+        )
+        self.lift()
+
+    def _on_initiate(self):
+        m = self._selected_match()
+        if not m:
+            return
+
+        warn = (
+            "即将以当前登录账号 (%s) 的名义，跨机构为以下居民"
+            "发起一份医生申请 (STATUS=5)：\n\n"
+            "  姓名: %s\n  身份证: %s\n  户籍地: %s\n  责任医生: %s\n\n"
+            "说明：\n"
+            "• 合同会先落到「医生申请」状态，需户籍地责任医生确认才生效；\n"
+            "• 若失败 / 不需要，可在主界面「3.0系统签约」 → 状态选「医生申请」"
+            "找到该合同并删除；\n"
+            "• 当前账号若没有跨机构权限，发起会被服务端拒绝。\n\n"
+            "确认继续？"
+        ) % (
+            self.client.org_code or self.client.account or "?",
+            m.name, m.id_card, m.address, m.doctor or "(无)",
+        )
+        if not messagebox.askyesno("确认跨机构发起", warn):
+            return
+
+        self._set_busy(True)
+        self.var_status.set("正在跨机构发起 %s ..." % m.name)
+
+        agree_start = self.app.var_agree_start.get().strip()
+        agree_end = self.app.var_agree_end.get().strip()
+        team_name = self.app.var_team.get().strip()
+        doctor = self.app.var_doctor.get().strip()
+        pop_code = self.app._get_pop_type_code()
+
+        def worker():
+            res = self.client.initiate_signing(
+                person_id=m.person_id,
+                team_name=team_name,
+                doctor_name=doctor,
+                service_type=pop_code,
+                agreement_start=agree_start,
+                agreement_end=agree_end,
+            )
+            self.after(0, lambda: self._on_initiate_done(m, res))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_initiate_done(self, m: ProvinceMatch, res: SignResult):
+        self._set_busy(False)
+        if res.success:
+            self.var_status.set(
+                "✓ 跨机构发起成功 — 合同 %s（STATUS=5，待户籍地医生确认）"
+                % res.contract_code
+            )
+            messagebox.showinfo(
+                "发起成功",
+                "已为 %s 创建医生申请。\n\n"
+                "合同编号：%s\n"
+                "状态：医生申请 (STATUS=5)\n\n"
+                "下一步：请联系户籍地（%s）责任医生在他们端「确认」该合同，"
+                "或参考《查证记录_曾桃英_v1.txt》6.A 方案换户籍地账号操作。"
+                % (m.name, res.contract_code, m.address),
+            )
+            self._on_load_contracts(m)
+        else:
+            self.var_status.set("✗ 发起失败：%s" % res.error)
+            messagebox.showerror("发起失败", res.error or "未知错误")
 
 
 class GulfSignApp(tk.Tk):
@@ -217,7 +662,13 @@ class GulfSignApp(tk.Tk):
         self.btn_query_all = ttk.Button(
             r0, text="查询全部", command=self._on_query_all
         )
-        self.btn_query_all.pack(side=tk.LEFT, padx=(0, 16))
+        self.btn_query_all.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_province_query = ttk.Button(
+            r0, text="🌐 全省找人 / 跨机构发起",
+            command=self._on_open_province_dialog,
+        )
+        self.btn_province_query.pack(side=tk.LEFT, padx=(0, 16))
 
         self.var_query_info = tk.StringVar(value="")
         ttk.Label(r0, textvariable=self.var_query_info, style="Info.TLabel").pack(
@@ -1625,6 +2076,13 @@ class GulfSignApp(tk.Tk):
         if idc:
             extra["SFZH"] = idc
         return extra
+
+    def _on_open_province_dialog(self):
+        if not self.client.logged_in:
+            messagebox.showwarning("提示", "请先登录 3.0 系统")
+            return
+        dlg = ProvinceLookupDialog(self)
+        dlg.grab_set()
 
     def _on_query(self):
         if not self.client.logged_in:

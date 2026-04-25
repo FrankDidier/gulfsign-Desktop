@@ -6,6 +6,7 @@
 技术栈: ASP.NET WebForms + dhtmlx + SM4/SM3国密
 """
 import re
+import json
 import time
 import logging
 from dataclasses import dataclass, field
@@ -137,6 +138,27 @@ class SignResult:
     error: str = ""
     step: str = ""
     elapsed: float = 0.0
+
+
+@dataclass
+class ProvinceMatch:
+    """全省个案查询命中的居民档案。"""
+    person_id: str
+    name: str = ""
+    id_card: str = ""
+    gender: str = ""
+    birth_date: str = ""
+    age: str = ""
+    address: str = ""
+    current_address: str = ""
+    archive_no: str = ""
+    archive_date: str = ""
+    doctor: str = ""
+    last_followup: str = ""
+    contact_name: str = ""
+    contact_phone: str = ""
+    is_realname: bool = False
+    is_visited: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +490,176 @@ class PH3Client:
 
         return patients, total
 
+    # ---- 全省个案查询 ----
+
+    def query_province_wide(
+        self,
+        sfzh: str = "",
+        name: str = "",
+        hjdz: str = "430000000000",
+        password: str = "",
+        page: int = 1,
+        exclude_cancelled: bool = False,
+    ) -> Tuple[List[ProvinceMatch], int, str]:
+        """全省范围个案查询（菜单：健康档案 → 全省个案查询）。
+
+        身份证号 sfzh 与 姓名 name 至少传一个。当用姓名时，户籍地 hjdz
+        必须细化到至少地市级（默认 430000000000 全省，但服务端会拒绝纯姓名 + 全省）。
+        password 为当前账号的登录密码（页面里叫"动态安全码/用户密码"）。
+
+        返回 (matches, total, error_msg)；error_msg 为空表示成功。
+        """
+        if not self.logged_in:
+            return [], 0, "未登录"
+        if not sfzh and not name:
+            return [], 0, "身份证号或姓名至少填一个"
+
+        ts = str(int(time.time() * 1000))
+        enc = PH3Crypto.crptosEn(ts, self.token_en)
+        sig = PH3Crypto.crptosTH(enc + self.token_th)
+
+        try:
+            resp = self.session.post(
+                self._url("/Sys_JCWS/B0101/Do_B0101_Handler.ashx"),
+                params={
+                    "ACTION": "10",
+                    "PAGENO": enc,
+                    "sign": sig,
+                    "CHECKCA": "2",
+                },
+                data={
+                    "GONGMINSHENFENHAOMA": sfzh.strip(),
+                    "RENYUANXINGMING": name.strip(),
+                    "HUJIGUANLIDI": hjdz or "430000000000",
+                    "PAICHUZHUXIAORENKOU_CHK": "1" if exclude_cancelled else "0",
+                    "SECURITYPASSWORD": password,
+                    "PAGEINDEX": str(page),
+                },
+                headers=self._csrf_header(),
+                timeout=self._timeout,
+            )
+        except requests.RequestException as e:
+            return [], 0, "请求失败: %s" % e
+
+        if resp.status_code != 200:
+            return [], 0, "HTTP %d" % resp.status_code
+
+        body = resp.text or ""
+        # JSON 形式的错误（密码错/参数错）
+        if body.lstrip().startswith("{"):
+            try:
+                obj = json.loads(body)
+                return [], 0, obj.get("msg", "查询失败")
+            except Exception:
+                return [], 0, "查询失败：%s" % body[:120]
+
+        # XML 行 + @@total
+        parts = body.split("@@")
+        xml_part = parts[0]
+        total = 0
+        if len(parts) > 1:
+            t = parts[1].strip()
+            if t.isdigit():
+                total = int(t)
+
+        matches: List[ProvinceMatch] = []
+        for row_m in re.finditer(
+            r'<row\s+id="([^"]+)"[^>]*>(.*?)</row>', xml_part, re.DOTALL
+        ):
+            pid = row_m.group(1)
+            cells_xml = row_m.group(2)
+            raw_cells = re.findall(
+                r"<cell([^>]*)>(.*?)</cell>", cells_xml, re.DOTALL
+            )
+            attrs_list = [a for a, _ in raw_cells]
+            text_cells = [_strip_html(t) for _, t in raw_cells]
+
+            def safe(idx: int) -> str:
+                return text_cells[idx] if idx < len(text_cells) else ""
+
+            # cell[1] 的 title 包含 "已通过实名制验证"
+            is_realname = False
+            if len(attrs_list) > 1 and "实名制" in attrs_list[1]:
+                is_realname = True
+            # cell[2] 内 onclick="mf_click(...)" 表示已面访
+            is_visited = False
+            if len(raw_cells) > 2 and "mf_click" in raw_cells[2][1]:
+                is_visited = True
+
+            matches.append(ProvinceMatch(
+                person_id=pid,
+                name=safe(8),
+                gender=safe(9),
+                birth_date=safe(10),
+                age=safe(11),
+                id_card=safe(12),
+                address=safe(5),
+                current_address=safe(6),
+                archive_no=safe(7),
+                contact_name=safe(14),
+                contact_phone=safe(15),
+                archive_date=safe(18),
+                doctor=safe(19),
+                last_followup=safe(4),
+                is_realname=is_realname,
+                is_visited=is_visited,
+            ))
+
+        return matches, total, ""
+
+    def list_personal_b0105(self, person_id: str) -> List[Dict]:
+        """读取居民档案中的家医签约记录（即"家医信息"侧边列表）。
+
+        返回每条记录: {contract_code, status_text, agreement_start,
+        agreement_end, doctor}
+        """
+        if not self.logged_in:
+            return []
+        try:
+            resp = self.session.get(
+                self._url("/Sys_JCWS/JKDA/Do_Query_Handler.ashx"),
+                params={
+                    "action": "B0105",
+                    "PAGENO": "1",
+                    "PERSONID": person_id,
+                    "n": str(int(time.time() * 1000)),
+                },
+                timeout=self._timeout,
+            )
+        except requests.RequestException:
+            return []
+        if resp.status_code != 200:
+            return []
+
+        out: List[Dict] = []
+        body = resp.text.split("@@")[0]
+        for row_m in re.finditer(
+            r'<row\s+id="([^"]+)"([^>]*)>(.*?)</row>', body, re.DOTALL
+        ):
+            cc = row_m.group(1)
+            attrs = row_m.group(2)
+            cells = [_strip_html(t) for t in re.findall(
+                r"<cell[^>]*>(.*?)</cell>", row_m.group(3), re.DOTALL
+            )]
+
+            def safe(idx: int) -> str:
+                return cells[idx] if idx < len(cells) else ""
+
+            voided = False
+            voided_m = re.search(r'B0105_13="([^"]+)"', attrs)
+            if voided_m and voided_m.group(1) == "1":
+                voided = True
+
+            out.append({
+                "contract_code": cc,
+                "status_text": ("作废" if voided else safe(1)) or safe(1),
+                "voided": voided,
+                "agreement_start": safe(2),
+                "agreement_end": safe(3),
+                "doctor": safe(4),
+            })
+        return out
+
     # ---- 发起签约 ----
 
     def _csrf_header(self) -> Dict[str, str]:
@@ -699,7 +891,11 @@ class PH3Client:
     def confirm_signing(
         self, person_id: str, contract_code: str, name: str = ""
     ) -> SignResult:
-        """确认居民申请的签约（仅适用于status=6的合同）。"""
+        """确认居民申请的签约（仅适用于 status=6 的合同）。
+
+        对 status=5（医生申请）调用 ACTION=9 时，服务端会拒绝（常见提示：该类型不能处理）；
+        与界面「确认」弹窗 Pg_Queren_Status 使用同一入口，但业务上只处理待审核的「居民端」申请。
+        """
         if not self.logged_in:
             return SignResult(False, person_id, name, error="未登录", step="confirm")
 
