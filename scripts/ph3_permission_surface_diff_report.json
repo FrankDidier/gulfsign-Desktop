@@ -1,0 +1,508 @@
+{
+  "ts": "2026-04-28T22:10:12Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "account": "430726…",
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "baseline": {
+    "tag": "baseline",
+    "form_main_sha16": "64aa8fc665740442",
+    "menu_sha16": "4160ee1015a9c622",
+    "form_main_len": 9720,
+    "menu_len": 18368,
+    "org_codes_sample": [
+      "430726000001024",
+      "430726100018"
+    ],
+    "keywords": {
+      "签约登记": false,
+      "代签": false,
+      "批量导入": false,
+      "签约审核": false,
+      "/cx/": false,
+      "daiqian": false,
+      "changxin": false,
+      "Pg_Change_Status": false
+    },
+    "checks": {
+      "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+        "status": 200,
+        "len": 21351
+      },
+      "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+        "status": 200,
+        "len": 2308
+      },
+      "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+        "status": 200,
+        "len": 13237
+      },
+      "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+        "status": 200,
+        "len": 9556
+      }
+    }
+  },
+  "probes": [
+    {
+      "index": 1,
+      "action": "SWITCHORG",
+      "params": {
+        "ORGCODE": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SWITCHORG_1",
+        "form_main_sha16": "f2a2365cd927856c",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    },
+    {
+      "index": 2,
+      "action": "SWITCHORG",
+      "params": {
+        "ORGCODE": "430726100000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SWITCHORG_2",
+        "form_main_sha16": "f2a2365cd927856c",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    },
+    {
+      "index": 3,
+      "action": "CHANGEORG",
+      "params": {
+        "ORGCODE": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_CHANGEORG_3",
+        "form_main_sha16": "64aa8fc665740442",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": false
+    },
+    {
+      "index": 4,
+      "action": "CHANGEORG",
+      "params": {
+        "ID": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_CHANGEORG_4",
+        "form_main_sha16": "42b5d23e639988dc",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    },
+    {
+      "index": 5,
+      "action": "SETORG",
+      "params": {
+        "ORGCODE": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SETORG_5",
+        "form_main_sha16": "64aa8fc665740442",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": false
+    },
+    {
+      "index": 6,
+      "action": "SELECTORG",
+      "params": {
+        "ORGCODE": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SELECTORG_6",
+        "form_main_sha16": "f2a2365cd927856c",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    },
+    {
+      "index": 7,
+      "action": "SETRIGHTORG",
+      "params": {
+        "ORGCODE": "430726000000"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SETRIGHTORG_7",
+        "form_main_sha16": "64aa8fc665740442",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": false
+    },
+    {
+      "index": 8,
+      "action": "SWITCHORG",
+      "params": {
+        "ORGCODE": "430726000001024"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_SWITCHORG_8",
+        "form_main_sha16": "f2a2365cd927856c",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    },
+    {
+      "index": 9,
+      "action": "CHANGEORG",
+      "params": {
+        "ORGCODE": "430726000001024"
+      },
+      "get_status": 200,
+      "get_len": 0,
+      "post_status": 200,
+      "post_len": 0,
+      "snapshot": {
+        "tag": "after_CHANGEORG_9",
+        "form_main_sha16": "ab208765d702fe7b",
+        "menu_sha16": "4160ee1015a9c622",
+        "form_main_len": 9720,
+        "menu_len": 18368,
+        "org_codes_sample": [
+          "430726000001024",
+          "430726100018"
+        ],
+        "keywords": {
+          "签约登记": false,
+          "代签": false,
+          "批量导入": false,
+          "签约审核": false,
+          "/cx/": false,
+          "daiqian": false,
+          "changxin": false,
+          "Pg_Change_Status": false
+        },
+        "checks": {
+          "/Sys_JCWS/B0105/Pg_View_B0105.aspx": {
+            "status": 200,
+            "len": 21351
+          },
+          "/Sys_JCWS/B0105/Pg_Change_Status.aspx": {
+            "status": 200,
+            "len": 2308
+          },
+          "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx": {
+            "status": 200,
+            "len": 13237
+          },
+          "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx": {
+            "status": 200,
+            "len": 9556
+          }
+        }
+      },
+      "surface_changed": true
+    }
+  ],
+  "any_surface_changed": true
+}

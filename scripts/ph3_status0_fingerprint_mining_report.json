@@ -1,0 +1,286 @@
+{
+  "ts": "2026-04-28T23:16:44Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "max_records": 220,
+  "signed_total": 891,
+  "analyzed_count": 220,
+  "feature_counts": {
+    "QYZFBS": {
+      "0": 220
+    },
+    "XGR_present": {
+      "1": 207,
+      "0": 13
+    },
+    "XGDW_present": {
+      "1": 215,
+      "0": 5
+    },
+    "XGSJ_present": {
+      "1": 220
+    },
+    "QYYS_shape": {
+      "doctor_name": 220
+    },
+    "QYRQ_top20": {
+      "20260425": 97,
+      "20260101": 30,
+      "20260317": 29,
+      "20260427": 13,
+      "20260316": 12,
+      "20260315": 11,
+      "20260309": 6,
+      "20250915": 2,
+      "20260110": 2,
+      "20260117": 1,
+      "20250524": 1,
+      "20160301": 1,
+      "20250522": 1,
+      "20251015": 1,
+      "20260207": 1,
+      "20250821": 1,
+      "20260409": 1,
+      "20260308": 1,
+      "20260226": 1,
+      "20260301": 1
+    }
+  },
+  "top_clusters": [
+    {
+      "cluster": "QYZFBS=0|XGR=1|XGDW=1|XGSJ=1|QYYS=doctor_name",
+      "count": 207
+    },
+    {
+      "cluster": "QYZFBS=0|XGR=0|XGDW=1|XGSJ=1|QYYS=doctor_name",
+      "count": 8
+    },
+    {
+      "cluster": "QYZFBS=0|XGR=0|XGDW=0|XGSJ=1|QYYS=doctor_name",
+      "count": 5
+    }
+  ],
+  "samples": [
+    {
+      "person_id": "465038444",
+      "name": "王文武",
+      "contract_code": "a676a3f4-882a-4773-81b4-a980b1e81232",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260315",
+      "QYYS": "易恩成",
+      "QYRQ": "20260315"
+    },
+    {
+      "person_id": "464525392",
+      "name": "钟家松",
+      "contract_code": "da6f159e-494b-4de5-ac7b-c0fef7f09ea8",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260301",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "464482765",
+      "name": "滕代凡",
+      "contract_code": "b97eb603-7d6c-4f0d-bed1-f577c4061a5a",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "464426103",
+      "name": "田凤桐",
+      "contract_code": "0a687cf8-2758-45e2-95bd-b4d26ccd4749",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "464185196",
+      "name": "邢腊英",
+      "contract_code": "f23f60ee-c359-4d0f-b943-86c3310053f0",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260315",
+      "QYYS": "易恩成",
+      "QYRQ": "20260315"
+    },
+    {
+      "person_id": "464185188",
+      "name": "郭祚虎",
+      "contract_code": "14eaa221-1853-4579-8832-6c809f7878cb",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "464090379",
+      "name": "钱超红",
+      "contract_code": "cb971a6c-c1a5-4cbe-90ff-e198d8bfeecb",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260425",
+      "QYYS": "易恩成",
+      "QYRQ": "20260425"
+    },
+    {
+      "person_id": "463937585",
+      "name": "李德交",
+      "contract_code": "5d0c5d9b-d2d5-4951-81cb-474abb021857",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "463812616",
+      "name": "杨翠兰",
+      "contract_code": "092af0d8-a33d-4388-8aa3-3d23d6d2a610",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260425",
+      "QYYS": "易恩成",
+      "QYRQ": "20260425"
+    },
+    {
+      "person_id": "463514398",
+      "name": "罗伯平",
+      "contract_code": "d071a8c8-c8da-4817-b18c-42165d077d5e",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "463491038",
+      "name": "陈菊姑",
+      "contract_code": "e2c2aeb1-7b21-4e90-a032-7ab1ec571682",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "462874089",
+      "name": "杨宗英",
+      "contract_code": "f3fb4f60-f28c-43ca-8b1d-1154b2179283",
+      "QYZFBS": "0",
+      "XGR": "",
+      "XGDW": "430726000032009",
+      "XGSJ": "20260124",
+      "QYYS": "叶正英",
+      "QYRQ": "20260117"
+    },
+    {
+      "person_id": "462859226",
+      "name": "邱凤玉",
+      "contract_code": "ccef0057-7e6f-45c8-bb18-98d2c24f102e",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "462619450",
+      "name": "杨非州",
+      "contract_code": "c2038871-d6f8-4f21-8ea0-b54b7f90013c",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260425",
+      "QYYS": "易恩成",
+      "QYRQ": "20260425"
+    },
+    {
+      "person_id": "462619370",
+      "name": "向才秀",
+      "contract_code": "3b4fc15f-31c7-4bd1-a40f-949e2fae2368",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260425",
+      "QYYS": "易恩成",
+      "QYRQ": "20260425"
+    },
+    {
+      "person_id": "462595197",
+      "name": "陈菊香",
+      "contract_code": "3560f2f2-0baa-420c-99eb-4e7e1036e5e2",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260322",
+      "QYYS": "易恩成",
+      "QYRQ": "20260101"
+    },
+    {
+      "person_id": "462258784",
+      "name": "陈井柏",
+      "contract_code": "d758ee1c-f6bb-4e3a-b53a-983033d8d5fc",
+      "QYZFBS": "0",
+      "XGR": "",
+      "XGDW": "",
+      "XGSJ": "20250524",
+      "QYYS": "岳成亮",
+      "QYRQ": "20250524"
+    },
+    {
+      "person_id": "462258756",
+      "name": "孙邦云",
+      "contract_code": "5944bcd9-7837-4896-bcca-acbc54b62dd8",
+      "QYZFBS": "0",
+      "XGR": "430726000001010WS",
+      "XGDW": "430726000001024",
+      "XGSJ": "20260301",
+      "QYYS": "易恩成",
+      "QYRQ": "20160301"
+    },
+    {
+      "person_id": "462258741",
+      "name": "佘湘岳",
+      "contract_code": "6ef0338b-c81c-4826-bbfe-e83429847acf",
+      "QYZFBS": "0",
+      "XGR": "CHENYUHUA",
+      "XGDW": "430726000001037",
+      "XGSJ": "20260316",
+      "QYYS": "陈玉华",
+      "QYRQ": "20260316"
+    },
+    {
+      "person_id": "462258724",
+      "name": "李卓拳",
+      "contract_code": "b8dbd886-c09b-4262-9b4c-e32355a09fdf",
+      "QYZFBS": "0",
+      "XGR": "CHENYUHUA",
+      "XGDW": "430726000001037",
+      "XGSJ": "20260316",
+      "QYYS": "陈玉华",
+      "QYRQ": "20260316"
+    }
+  ]
+}

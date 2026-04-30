@@ -1,0 +1,649 @@
+{
+  "ts": "2026-04-28T19:42:03Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "account": "430726…",
+  "active_b0105": true,
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "active_contract": {
+    "person_id": "465335104",
+    "contract_code": "bd4ee503-ba39-42f8-921f-b0e1852332bf"
+  },
+  "probes": [
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "1",
+      "get_status": 200,
+      "get_len": 933,
+      "get_snippet": "{\"opType\":1,\"msg\":\"新增接口申请信息登记表失败！原因：申请单位不能为空。\\r\\t申请单位长度不能少于5。\\r\\t申请单位联系人不能为空。\\r\\t申请单位联系电话不能为空。\\r\\t申请单位联系电话验证错误。\\r\\t系统（平台）承建方名称不能为空。\\r\\t系统（平台）承建方名称长度不能少于5。\\r\\t联系人不能为空。\\r\\t联系电话不能为空。\\r\\t承建方联系电话验证错误。\\r\\t系…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "10",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "2",
+      "get_status": 200,
+      "get_len": 844,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改接口申请信息登记表失败！原因：申请单位不能为空。\\r\\t申请单位长度不能少于5。\\r\\t申请单位联系人不能为空。\\r\\t申请单位联系电话不能为空。\\r\\t申请单位联系电话验证错误。\\r\\t系统（平台）承建方名称不能为空。\\r\\t系统（平台）承建方名称长度不能少于5。\\r\\t联系人不能为空。\\r\\t联系电话不能为空。\\r\\t承建方联系电话验证错误。\\r\\t系…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "3",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "4",
+      "get_status": 200,
+      "get_len": 55,
+      "get_snippet": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "5",
+      "get_status": 200,
+      "get_len": 157,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改接口申请信息登记表失败！原因：guid不能为空。\\r\\t审核状态不能为空。\\r\\t审核文件不能为空。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "6",
+      "get_status": 200,
+      "get_len": 1,
+      "get_snippet": "\u0000",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "7",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "8",
+      "get_status": 200,
+      "get_len": 74,
+      "get_snippet": "{\"opType\":1,\"msg\":\"信息补充失败！原因：guid不能为空。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "9",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "1",
+      "get_status": 200,
+      "get_len": 640,
+      "get_snippet": "{\"opType\":1,\"msg\":\"新增家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t签约类型错误，不允许空填。\\r\\t签约团队错误，不允许空填。\\r\\t签约医生错误，不允许空填。\\r\\t服务包错误，不允许空填。\\r\\t团队名称错误，不允许空填。\\r\\t服务包名称错误，不允许空填。\\r\\t协议开始日期错误，不允许空填。\\r\\t签约周期错误，不允许空填。\\r\\t协议结束日期错误，不…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "10",
+      "get_status": 200,
+      "get_len": 95,
+      "get_snippet": "{\"opType\":1,\"msg\":\"新增家庭档案基本信息失败！原因：json不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "11",
+      "get_status": 200,
+      "get_len": 106,
+      "get_snippet": "{\"opType\":1,\"msg\":\"家庭医生签约作废失败！原因：签约编码错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "2",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "3",
+      "get_status": 200,
+      "get_len": 96,
+      "get_snippet": "{\"opType\":1,\"msg\":\"删除家庭医生签约信息失败！原因：主键标识不能为空。\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "4",
+      "get_status": 200,
+      "get_len": 40,
+      "get_snippet": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "5",
+      "get_status": 200,
+      "get_len": 253,
+      "get_snippet": "{\"opType\":1,\"msg\":\"新增家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t联系医生错误，不允许空填。\\r\\t拒绝签约时间错误，不允许空填。\\r\\t拒绝签约类型错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "6",
+      "get_status": 200,
+      "get_len": 247,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改拒绝签约信息失败！原因：人员编码错误，不允许空填。\\r\\t联系医生错误，不允许空填。\\r\\t拒绝签约时间错误，不允许空填。\\r\\t拒绝签约类型错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "7",
+      "get_status": 500,
+      "get_len": 4223,
+      "get_snippet": "<!DOCTYPE html>  <html>      <head>          <title>输入字符串的格式不正确。</title>          <meta name=\"viewport\" content=\"width=device-width\" />          <style>           body {font-family:\"Verdana\";font-weig…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "8",
+      "get_status": 200,
+      "get_len": 12,
+      "get_snippet": "{\"B0110\":[]}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "9",
+      "get_status": 200,
+      "get_len": 198,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t人员编码错误，不允许空填！\\r\\t签约状态错误，不允许空填！\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "DOSAVE",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "DOUPDATE",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "GETCARDSSTATUSFORM",
+      "get_status": 200,
+      "get_len": 131,
+      "get_snippet": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS></STATUS><REMARK><![CDATA[]]></REMARK><GUID></GUID><PERSONID></PERSONID></data>",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "UPDATE",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "1",
+      "get_status": 500,
+      "get_len": 3823,
+      "get_snippet": "<!DOCTYPE html>  <html>      <head>          <title>未将对象引用设置到对象的实例。</title>          <meta name=\"viewport\" content=\"width=device-width\" />          <style>           body {font-family:\"Verdana\";font-w…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "2",
+      "get_status": 200,
+      "get_len": 315,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改团队信息管理失败！原因：团队名称错误，不允许空填。\\r\\t值班手机错误，不允许空填。\\r\\t值班电话错误，不允许空填。\\r\\t协议模板错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t团队成员错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "3",
+      "get_status": 200,
+      "get_len": 84,
+      "get_snippet": "{\"opType\":1,\"msg\":\"删除健康体检失败！原因：主键标识不能为空。\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "4",
+      "get_status": 200,
+      "get_len": 40,
+      "get_snippet": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "1",
+      "get_status": 200,
+      "get_len": 435,
+      "get_snippet": "{\"opType\":1,\"msg\":\"新增服务包信息失败！原因：服务包名称错误，不允许空填。\\r\\t服务包类型错误，不允许空填。\\r\\t共享错误，不允许空填。\\r\\t适宜人群错误，不允许空填。\\r\\t户口属性错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t简介错误，不允许空填。\\r\\t基础服务错误，不允许空填。\\r\\t价格总计错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "10",
+      "get_status": 200,
+      "get_len": 42,
+      "get_snippet": "{\"opType\":1,\"msg\":\"主表ID不能为空.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "2",
+      "get_status": 200,
+      "get_len": 435,
+      "get_snippet": "{\"opType\":1,\"msg\":\"修改服务包信息失败！原因：服务包名称错误，不允许空填。\\r\\t服务包类型错误，不允许空填。\\r\\t共享错误，不允许空填。\\r\\t适宜人群错误，不允许空填。\\r\\t户口属性错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t简介错误，不允许空填。\\r\\t基础服务错误，不允许空填。\\r\\t价格总计错误，不允许空填。\\r\\t\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "3",
+      "get_status": 200,
+      "get_len": 2492,
+      "get_snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html>  <head>      <title>          操作失败</title>      <meta http-equiv=\"Cont…",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "4",
+      "get_status": 200,
+      "get_len": 40,
+      "get_snippet": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "7",
+      "get_status": 200,
+      "get_len": 42,
+      "get_snippet": "{\"opType\":1,\"msg\":\"父表ID不能为空.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/JKDA/Do_Query_Handler.ashx",
+      "action": "B0105",
+      "get_status": 200,
+      "get_len": 48,
+      "get_snippet": "{\"opType\":1,\"msg\":\"查询编号不能为空。\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "1",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "10",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "11",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "2",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "3",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "4",
+      "get_status": 200,
+      "get_len": 40,
+      "get_snippet": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "5",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "6",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "7",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "8",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "9",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "EXPORT",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "IMPORT",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "LIST",
+      "get_status": 200,
+      "get_len": 0,
+      "get_snippet": "",
+      "post_status": 200,
+      "post_len": 0,
+      "post_snippet": ""
+    }
+  ],
+  "active_cleanup_deleted": true,
+  "interesting": [
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "1",
+      "get": "{\"opType\":1,\"msg\":\"新增接口申请信息登记表失败！原因：申请单位不能为空。\\r\\t申请单位长度不能少于5。\\r\\t申请单位联系人不能为空。\\r\\t申请单位联系电话不能为空。\\r\\t申请单位联系电话验证错误。\\r\\t系统（平台）承建方名称不能为空。\\r\\t系统（平台）承建方名称长度不能少于5。\\r\\t联系人不能为空。\\r\\t联系电话不能为空。\\r\\t承建方联系电话验证错误。\\r\\t系…",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "2",
+      "get": "{\"opType\":1,\"msg\":\"修改接口申请信息登记表失败！原因：申请单位不能为空。\\r\\t申请单位长度不能少于5。\\r\\t申请单位联系人不能为空。\\r\\t申请单位联系电话不能为空。\\r\\t申请单位联系电话验证错误。\\r\\t系统（平台）承建方名称不能为空。\\r\\t系统（平台）承建方名称长度不能少于5。\\r\\t联系人不能为空。\\r\\t联系电话不能为空。\\r\\t承建方联系电话验证错误。\\r\\t系…",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "5",
+      "get": "{\"opType\":1,\"msg\":\"修改接口申请信息登记表失败！原因：guid不能为空。\\r\\t审核状态不能为空。\\r\\t审核文件不能为空。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "action": "8",
+      "get": "{\"opType\":1,\"msg\":\"信息补充失败！原因：guid不能为空。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "1",
+      "get": "{\"opType\":1,\"msg\":\"新增家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t签约类型错误，不允许空填。\\r\\t签约团队错误，不允许空填。\\r\\t签约医生错误，不允许空填。\\r\\t服务包错误，不允许空填。\\r\\t团队名称错误，不允许空填。\\r\\t服务包名称错误，不允许空填。\\r\\t协议开始日期错误，不允许空填。\\r\\t签约周期错误，不允许空填。\\r\\t协议结束日期错误，不…",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "10",
+      "get": "{\"opType\":1,\"msg\":\"新增家庭档案基本信息失败！原因：json不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "11",
+      "get": "{\"opType\":1,\"msg\":\"家庭医生签约作废失败！原因：签约编码错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "3",
+      "get": "{\"opType\":1,\"msg\":\"删除家庭医生签约信息失败！原因：主键标识不能为空。\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "4",
+      "get": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "5",
+      "get": "{\"opType\":1,\"msg\":\"新增家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t联系医生错误，不允许空填。\\r\\t拒绝签约时间错误，不允许空填。\\r\\t拒绝签约类型错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "6",
+      "get": "{\"opType\":1,\"msg\":\"修改拒绝签约信息失败！原因：人员编码错误，不允许空填。\\r\\t联系医生错误，不允许空填。\\r\\t拒绝签约时间错误，不允许空填。\\r\\t拒绝签约类型错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "action": "9",
+      "get": "{\"opType\":1,\"msg\":\"修改家庭医生签约信息失败！原因：人员编码错误，不允许空填。\\r\\t人员编码错误，不允许空填！\\r\\t签约状态错误，不允许空填！\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "2",
+      "get": "{\"opType\":1,\"msg\":\"修改团队信息管理失败！原因：团队名称错误，不允许空填。\\r\\t值班手机错误，不允许空填。\\r\\t值班电话错误，不允许空填。\\r\\t协议模板错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t团队成员错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "3",
+      "get": "{\"opType\":1,\"msg\":\"删除健康体检失败！原因：主键标识不能为空。\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0107/Do_B0107_Handler.ashx",
+      "action": "4",
+      "get": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "1",
+      "get": "{\"opType\":1,\"msg\":\"新增服务包信息失败！原因：服务包名称错误，不允许空填。\\r\\t服务包类型错误，不允许空填。\\r\\t共享错误，不允许空填。\\r\\t适宜人群错误，不允许空填。\\r\\t户口属性错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t简介错误，不允许空填。\\r\\t基础服务错误，不允许空填。\\r\\t价格总计错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "10",
+      "get": "{\"opType\":1,\"msg\":\"主表ID不能为空.\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "2",
+      "get": "{\"opType\":1,\"msg\":\"修改服务包信息失败！原因：服务包名称错误，不允许空填。\\r\\t服务包类型错误，不允许空填。\\r\\t共享错误，不允许空填。\\r\\t适宜人群错误，不允许空填。\\r\\t户口属性错误，不允许空填。\\r\\t状态错误，不允许空填。\\r\\t简介错误，不允许空填。\\r\\t基础服务错误，不允许空填。\\r\\t价格总计错误，不允许空填。\\r\\t\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "4",
+      "get": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/B0110/Do_B0110_Handler.ashx",
+      "action": "7",
+      "get": "{\"opType\":1,\"msg\":\"父表ID不能为空.\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/JKDA/Do_Query_Handler.ashx",
+      "action": "B0105",
+      "get": "{\"opType\":1,\"msg\":\"查询编号不能为空。\"}",
+      "post": ""
+    },
+    {
+      "handler": "/Sys_JCWS/TBLSYS_ExportExcel/Do_TBLSYS_ExportExcel_Handler.ashx",
+      "action": "4",
+      "get": "{\"opType\":1,\"msg\":\"请求参数错误.\"}",
+      "post": ""
+    }
+  ]
+}

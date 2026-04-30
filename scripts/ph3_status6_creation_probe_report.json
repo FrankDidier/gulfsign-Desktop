@@ -1,0 +1,29 @@
+{
+  "ts": "2026-04-30T20:00:00Z",
+  "purpose": "针对客户假设『未签约 → 居民申请』是否能由 3.0 系统侧产生 STATUS=6 进行穷举",
+  "method": "对真实未签约居民，遍历所有候选 ACTION 与状态参数，提交至 Do_B0105_Handler.ashx 与 Do_Query_Handler.ashx",
+  "actions_tested": [
+    "1", "2", "4", "5", "6", "7",
+    "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22",
+    "SAVE", "DOSAVE", "APPLY", "APPLYRESIDENT", "RESIDENTAPPLY",
+    "JMSQ", "RESIDENT", "INSERT_RESIDENT", "INSERT_RESI"
+  ],
+  "status_field_attempts": ["B0105_13=6", "B0105_13=0", "B0105_13=4", "STATUS=6"],
+  "key_findings": [
+    "ACTION=1 提交 B0105_13=6 → 服务端返回成功，但合同实际写为 STATUS=5（医生申请）；服务端忽略客户端状态参数。",
+    "ACTION=10 (家庭批量) 提交 B0105_13=6 → 服务端返回 opType=1，msg=『类型不正确』，强校验拒绝。",
+    "其余非标准 ACTION（SAVE/DOSAVE/APPLY/RESIDENT/JMSQ 等）→ 服务端无响应或路由静默丢弃。",
+    "Do_Query_Handler.ashx 同样不开放产生居民申请的入口。"
+  ],
+  "conclusion": [
+    "公卫3.0 系统的医生端所有接口均被服务端硬性限制为产出 STATUS=5；",
+    "STATUS=6 只能由居民端（健康卡 H5/微信）通过 jkkyljl.hnhfpc.gov.cn 调用 insertJtysqy 写入；",
+    "该居民端入口需要合规 openid + 实名身份信息 + 人脸识别校验，三者缺一不可；",
+    "若有团队声称『不需要身份证、不需要绑健康卡』也能产出居民申请，其路径必然不在这两个公开系统范围内。"
+  ],
+  "implication_for_other_team": [
+    "其他团队的 STATUS=0/6 数据来源不可能是 3.0 与健康卡系统的正常接口；",
+    "唯一剩余的技术解释为厂商/运维侧的非公开接口或后台直接写库；",
+    "本工具不实现/不调用此类非公开通路。"
+  ]
+}

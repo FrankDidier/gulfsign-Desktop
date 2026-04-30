@@ -1,0 +1,115 @@
+{
+  "ts": "2026-04-28T19:42:25Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "account": "430726…",
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "status0_sample_count": 20,
+  "status5_sample_count": 0,
+  "temp_created": {
+    "person_id": "465335104",
+    "contract_code": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9",
+    "name": "张厚平"
+  },
+  "profiles": {
+    "existing_status0": {
+      "person_id": "465038444",
+      "contract_code": "a676a3f4-882a-4773-81b4-a980b1e81232",
+      "edit_http_status": 200,
+      "edit_fields": {
+        "ACTION": "2",
+        "QYZFBS": "0",
+        "QYZFSJ": "",
+        "SBR": "430726000001010WS",
+        "SBSJ": "20260315",
+        "SBDW": "",
+        "XGR": "430726000001010WS",
+        "XGDW": "430726000001024",
+        "XGSJ": "20260315",
+        "QYRQ": "20260315",
+        "XYKSRQ": "20260101",
+        "XYJSRQ": "20261231",
+        "QYLX_INPUT": "2",
+        "QYYS": "易恩成",
+        "CONTRACT_CODE": "a676a3f4-882a-4773-81b4-a980b1e81232",
+        "GUID": "a676a3f4-882a-4773-81b4-a980b1e81232",
+        "PERSONID": "465038444"
+      },
+      "status_form_http": 200,
+      "status_form_raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>0</STATUS><REMARK><![CDATA[]]></REMARK><GUID>a676a3f4-882a-4773-81b4-a980b1e81232</GUID><PERSONID>465038444</PERSONID></data>",
+      "row_attrs_status0": {
+        "person_id": "465038444",
+        "contract_code": "a676a3f4-882a-4773-81b4-a980b1e81232"
+      }
+    },
+    "temp_status5": {
+      "person_id": "465335104",
+      "contract_code": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9",
+      "edit_http_status": 200,
+      "edit_fields": {
+        "ACTION": "2",
+        "QYZFBS": "5",
+        "QYZFSJ": "",
+        "SBR": "430726000001010WS",
+        "SBSJ": "20260429",
+        "SBDW": "",
+        "XGR": "",
+        "XGDW": "",
+        "XGSJ": "",
+        "QYRQ": "20260429",
+        "XYKSRQ": "20260101",
+        "XYJSRQ": "20261231",
+        "QYLX_INPUT": "2",
+        "QYYS": "430726000001010WS",
+        "CONTRACT_CODE": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9",
+        "GUID": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9",
+        "PERSONID": "465335104"
+      },
+      "status_form_http": 200,
+      "status_form_raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9</GUID><PERSONID>465335104</PERSONID></data>"
+    }
+  },
+  "edit_field_diffs_status0_vs_temp5": {
+    "CONTRACT_CODE": {
+      "status0": "a676a3f4-882a-4773-81b4-a980b1e81232",
+      "temp_status5": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9"
+    },
+    "GUID": {
+      "status0": "a676a3f4-882a-4773-81b4-a980b1e81232",
+      "temp_status5": "3c17aa41-c0ab-40f8-b5ad-bf2ae5846ee9"
+    },
+    "PERSONID": {
+      "status0": "465038444",
+      "temp_status5": "465335104"
+    },
+    "QYRQ": {
+      "status0": "20260315",
+      "temp_status5": "20260429"
+    },
+    "QYYS": {
+      "status0": "易恩成",
+      "temp_status5": "430726000001010WS"
+    },
+    "QYZFBS": {
+      "status0": "0",
+      "temp_status5": "5"
+    },
+    "SBSJ": {
+      "status0": "20260315",
+      "temp_status5": "20260429"
+    },
+    "XGDW": {
+      "status0": "430726000001024",
+      "temp_status5": ""
+    },
+    "XGR": {
+      "status0": "430726000001010WS",
+      "temp_status5": ""
+    },
+    "XGSJ": {
+      "status0": "20260315",
+      "temp_status5": ""
+    }
+  },
+  "temp_cleanup_deleted": true
+}

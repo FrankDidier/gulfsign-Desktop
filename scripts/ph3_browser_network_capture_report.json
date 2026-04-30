@@ -1,0 +1,23 @@
+{
+  "ts": "2026-04-28T23:22:30Z",
+  "method": "cursor-ide-browser MCP live capture",
+  "view_id": "526e7f",
+  "login_result": {
+    "url_after_enter": "https://ggws.hnhfpc.gov.cn/FormMain.aspx",
+    "success": true
+  },
+  "target_page": "https://ggws.hnhfpc.gov.cn/Sys_JCWS/B0105/Pg_View_B0105.aspx",
+  "interactive_refs_found": 29,
+  "captured_xhr_urls": [
+    "https://ggws.hnhfpc.gov.cn/ashx/Common.ashx?action=ADDRTREE2&id=0&dhxr1777418488775=1",
+    "https://ggws.hnhfpc.gov.cn/ashx/Common.ashx?action=ORGTREE&id=0&dhxr1777418488775=1"
+  ],
+  "captured_do_b0105_requests": [],
+  "observation": "点击“查询”后未在顶层网络捕获到 Do_B0105_Handler.ashx；结合页面结构与 MCP 限制，推断核心 grid 请求位于 iframe/子文档上下文，当前 browser_network_requests 对该上下文不可见。",
+  "snapshot_logs": [
+    "/Users/vv/.cursor/browser-logs/snapshot-2026-04-28T23-21-28-822Z-n50d2y.log",
+    "/Users/vv/.cursor/browser-logs/snapshot-2026-04-28T23-21-45-992Z-7jej53.log"
+  ],
+  "conclusion": "浏览器实采未发现新的可疑签约落 0 请求通道，与既有请求侧探测结论一致。"
+}
+

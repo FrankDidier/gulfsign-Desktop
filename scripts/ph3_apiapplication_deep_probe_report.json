@@ -1,0 +1,75 @@
+{
+  "ts": "2026-04-28T23:16:42Z",
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "upload_tests": [
+    {
+      "file": "a.pdf",
+      "http": 200,
+      "resp": "{\"opType\":0,\"msg\":\"文件上传成功！\",\"type\":\"jksq/dbe6b766-15ec-477a-aa41-93b8d860eb17.pdf\"}",
+      "path": "jksq/dbe6b766-15ec-477a-aa41-93b8d860eb17.pdf"
+    },
+    {
+      "file": "b.pdf",
+      "http": 200,
+      "resp": "{\"opType\":0,\"msg\":\"文件上传成功！\",\"type\":\"jksq/1591957d-ba36-4572-81d1-eefec4813730.pdf\"}",
+      "path": "jksq/1591957d-ba36-4572-81d1-eefec4813730.pdf"
+    },
+    {
+      "file": "review.pdf",
+      "http": 200,
+      "resp": "{\"opType\":0,\"msg\":\"文件上传成功！\",\"type\":\"jksq/329da2da-9611-42f4-91bc-6b3c01d36b59.pdf\"}",
+      "path": "jksq/329da2da-9611-42f4-91bc-6b3c01d36b59.pdf"
+    }
+  ],
+  "create_tests": [
+    {
+      "variant": "normal_org",
+      "http": 200,
+      "resp": "{\"opType\":1,\"msg\":\"新增接口申请信息登记表失败:接口申请信息新增失败，原因：非县级不能进行申请。\\r\\t\"}"
+    },
+    {
+      "variant": "spoof_county_org",
+      "http": 200,
+      "resp": "{\"opType\":0,\"msg\":\"新增接口申请信息登记表成功！\"}"
+    }
+  ],
+  "query_matrix": [
+    {
+      "ORGCODE1": "",
+      "http": 200,
+      "len": 55,
+      "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0"
+    },
+    {
+      "ORGCODE1": "0",
+      "http": 200,
+      "len": 55,
+      "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0"
+    },
+    {
+      "ORGCODE1": "430726000001024",
+      "http": 200,
+      "len": 55,
+      "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0"
+    },
+    {
+      "ORGCODE1": "430726100000",
+      "http": 200,
+      "len": 55,
+      "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0"
+    },
+    {
+      "ORGCODE1": "430726000000",
+      "http": 200,
+      "len": 55,
+      "head": "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <rows></rows>@@0"
+    }
+  ],
+  "shenhe_tests": [
+    {
+      "guid": "(none)",
+      "skip": "no list row available"
+    }
+  ]
+}

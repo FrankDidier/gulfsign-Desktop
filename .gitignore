@@ -12,3 +12,4 @@ gulfsign_config.json
 certs/
 traffic_log.txt
 captured_openids.txt
+scripts/ph3_probe_history.jsonl

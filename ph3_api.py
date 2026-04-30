@@ -886,6 +886,208 @@ class PH3Client:
                 step="initiate", elapsed=time.time() - t0,
             )
 
+    # ---- 家庭归属反查 ----
+
+    def find_family_guid(
+        self, person_id: str, member_name: str = "",
+    ) -> Tuple[str, str]:
+        """根据 PERSONID + 成员姓名反查所属家庭 GUID。
+
+        实现：先按 ``CYXM=member_name`` 过滤 ``Pg_View_B0103`` 的 ``action=4`` 列表，
+        再对每条家庭记录调用 ``action=5`` 拉取成员，匹配 PERSONID。
+
+        返回 (family_guid, head_personid)；找不到时返回 ("", "")。
+        """
+        if not self.logged_in or not person_id or not member_name:
+            return "", ""
+        try:
+            ts = str(int(time.time() * 1000))
+            enc = PH3Crypto.crptosEn("1|" + (self.org_code or "") + ts, self.token_en)
+            sign = PH3Crypto.crptosTH(enc + self.token_th)
+            resp = self.session.post(
+                self._url("/Sys_JCWS/B0103/Do_B0103_Handler.ashx"),
+                params={
+                    "action": "4", "PAGENO": enc, "sign": sign,
+                    "ORGCODE": self.org_code or "",
+                    "ADDRCODE": self.org_code or "", "TABCODE": "0",
+                },
+                data={
+                    "HZXM": "", "CYXM": member_name,
+                    "B0103_04_BEGIN": "", "B0103_04_END": "",
+                    "B0103_06": "", "B0103_11": "",
+                    "TABCODE": "0", "PAGEINDEX": "1",
+                },
+                timeout=self._timeout,
+            )
+        except requests.RequestException:
+            return "", ""
+        body = (resp.text or "").split("@@")[0]
+        for m in re.finditer(r'<row id="([^"]+)"([^>]*)>', body):
+            family_guid = m.group(1)
+            head = re.search(r'PERSONID="([^"]+)"', m.group(2))
+            head_pid = head.group(1) if head else ""
+            try:
+                ev, sg, ts2 = PH3Crypto.open_url_handle(
+                    family_guid, self.token_en, self.token_th,
+                )
+                rr = self.session.get(
+                    self._url("/Sys_JCWS/B0103/Do_B0103_Handler.ashx"),
+                    params={
+                        "action": "5", "PAGENO": "1",
+                        "ORGCODE": self.org_code or "",
+                        "ADDRCODE": self.org_code or "",
+                        "TABCODE": "0",
+                        "GUID": ev, "sign": sg, "n": ts2,
+                    },
+                    timeout=self._timeout,
+                )
+            except requests.RequestException:
+                continue
+            mb = (rr.text or "").split("@@")[0]
+            if re.search(r'PERSONID="' + re.escape(person_id) + r'"', mb):
+                return family_guid, head_pid
+        return "", ""
+
+    # ---- 家庭批量发起（ACTION=10） ----
+
+    def family_batch_initiate(
+        self,
+        person_ids: List[str],
+        family_guid: str = "",
+        team_name: str = "",
+        team_id: str = "",
+        doctor_name: str = "",
+        service_type: str = "0",
+        signing_date: str = "",
+        agreement_start: str = "",
+        agreement_end: str = "",
+        period: str = "1",
+        contact_phone: str = "",
+    ) -> Tuple[bool, str, List[Dict]]:
+        """批量发起家庭签约（``Do_B0105_Handler.ashx`` ``ACTION=10``）。
+
+        来源：B0103 家庭档案页面 ``Pg_Insert_Jtysqy.aspx`` 的 JS 实现。
+        服务端实现批量插入家庭医生签约记录，单条业务逻辑等价于 ``ACTION=1``，
+        即批量产生 ``STATUS=5`` (医生申请)，**不会直接落库为 STATUS=0**。
+
+        相对一对一 ``initiate_signing`` 的优势：
+          - 一次 HTTP 调用提交多人，吞吐量大幅提升；
+          - 避免逐个加载 ``Pg_Insert_B0105.aspx`` 表单页。
+
+        参数：
+          person_ids: 人员 PERSONID 列表（同家庭/同批次）
+          family_guid: 所属家庭档案 GUID（用于 JTID 字段）；可为空
+          contact_phone: 服务电话（YSLXDH），服务端要求非空，否则提交失败
+
+        返回：(success, message, created_contracts)
+          created_contracts: 成功时回填每位居民对应的合同号 (PERSONID, contract_code)。
+        """
+        import json as _json
+        if not self.logged_in:
+            return False, "未登录", []
+        if not person_ids:
+            return False, "person_ids 为空", []
+
+        t0 = time.time()
+        today = time.strftime("%Y%m%d")
+        start_date = agreement_start or today
+        if agreement_end:
+            end_date = agreement_end
+        else:
+            yrs = int(period) if str(period).isdigit() else 1
+            end_date = str(int(start_date[:4]) + yrs) + start_date[4:]
+
+        ts = str(int(time.time() * 1000))
+        sample_pid = person_ids[0]
+        enc_guid = PH3Crypto.crptosEn(sample_pid + "|" + ts, self.token_en)
+        sign = PH3Crypto.crptosTH(enc_guid + self.token_th)
+        try:
+            html = self.session.get(
+                self._url("/Sys_JCWS/B0105/Pg_Insert_B0105.aspx"),
+                params={"GUID": enc_guid, "sign": sign},
+                timeout=self._timeout,
+            ).text
+        except requests.RequestException as e:
+            return False, "团队/服务包加载失败: %s" % e, []
+
+        teams = self._load_teams(html)
+        tid, tname = self._find_team(
+            teams, team_name=team_name or self.team_name, team_id=team_id,
+        )
+        if not tid and teams:
+            tid, tname = teams[0].get("id", ""), teams[0].get("name", "")
+        fwb_ids, fwb_names = self._load_service_packs(service_type)
+
+        before_codes: Dict[str, set] = {}
+        for pid in person_ids:
+            try:
+                lst = self.list_personal_b0105(pid)
+                before_codes[pid] = {x.get("contract_code", "") for x in lst}
+            except Exception:
+                before_codes[pid] = set()
+
+        rows = []
+        for pid in person_ids:
+            rows.append({
+                "PERSONID": pid,
+                "B0105_03": tname,
+                "B0105_04": doctor_name or self.doctor_name or "",
+                "B0105_05": signing_date or today,
+                "B0105_07": start_date,
+                "B0105_09": end_date,
+                "B0105_08": str(period),
+                "B0105_03_GUID": tid,
+                "B0105_06_GUID": fwb_ids,
+                "B0105_06": fwb_names,
+                "JTID": family_guid,
+                "B0105_13": "5",
+                "B0105_10": "0",
+                "B0105_11": "0",
+                "B0105_12": "0",
+                "B0105_01": "2",
+                "B0105_02": contact_phone or "13800000000",
+            })
+
+        try:
+            resp = self.session.post(
+                self._url("/Sys_JCWS/B0105/Do_B0105_Handler.ashx"),
+                data={"ACTION": "10", "JSON": _json.dumps(rows, ensure_ascii=False)},
+                headers=self._csrf_header(),
+                timeout=self._timeout,
+            )
+        except requests.RequestException as e:
+            return False, "提交失败: %s" % e, []
+
+        if resp.status_code != 200:
+            return False, "HTTP %d" % resp.status_code, []
+
+        try:
+            obj = _json.loads(resp.text.strip())
+        except Exception:
+            return False, "服务器返回异常: %s" % resp.text[:160], []
+
+        if obj.get("opType") != 0:
+            return False, obj.get("msg", "ACTION=10 提交失败"), []
+
+        created: List[Dict] = []
+        for pid in person_ids:
+            try:
+                lst = self.list_personal_b0105(pid)
+            except Exception:
+                lst = []
+            for x in lst:
+                cc = x.get("contract_code", "")
+                if cc and cc not in before_codes.get(pid, set()):
+                    created.append({
+                        "person_id": pid,
+                        "contract_code": cc,
+                        "status_text": x.get("status_text", ""),
+                    })
+                    break
+
+        elapsed = time.time() - t0
+        return True, "家庭批量发起成功 (%d 人, %.1fs)" % (len(rows), elapsed), created
+
     # ---- 确认签约 ----
 
     def confirm_signing(

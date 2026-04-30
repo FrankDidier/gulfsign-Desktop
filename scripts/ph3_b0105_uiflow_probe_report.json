@@ -1,0 +1,74 @@
+{
+  "ts": "2026-04-28T23:16:41Z",
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "discovered_tokens": [
+    "Do_B0105_Handler.ashx",
+    "Pg_Input_Security_Password.aspx",
+    "Do_B0105_Handler.ashx",
+    "Pg_Export_Excel.aspx",
+    "Pg_Queren_Status.aspx",
+    "ACTION: \"DOUPDATE\"",
+    "Pg_Change_Status.aspx",
+    "ACTION: \"DOUPDATE\"",
+    "Pg_Change_Status.aspx",
+    "Do_B0105_Handler.ashx",
+    "Do_B0105_Handler.ashx"
+  ],
+  "discovered_actions": [
+    "DOUPDATE"
+  ],
+  "temp_contract": {
+    "person_id": "465335104",
+    "contract_code": "a8406721-6206-4266-b586-d746140d7340"
+  },
+  "probes": [
+    {
+      "action": "DOUPDATE",
+      "http": 200,
+      "resp": "",
+      "status_before": "5",
+      "status_after": "5",
+      "changed": false,
+      "to_zero": false
+    },
+    {
+      "action": "2",
+      "http": 200,
+      "resp": "",
+      "status_before": "5",
+      "status_after": "5",
+      "changed": false,
+      "to_zero": false
+    },
+    {
+      "action": "9",
+      "http": 200,
+      "resp": "",
+      "status_before": "5",
+      "status_after": "5",
+      "changed": false,
+      "to_zero": false
+    },
+    {
+      "action": "UPDATE",
+      "http": 200,
+      "resp": "",
+      "status_before": "5",
+      "status_after": "5",
+      "changed": false,
+      "to_zero": false
+    },
+    {
+      "action": "DOSAVE",
+      "http": 200,
+      "resp": "",
+      "status_before": "5",
+      "status_after": "5",
+      "changed": false,
+      "to_zero": false
+    }
+  ],
+  "any_to_zero": false,
+  "cleanup_deleted": true
+}

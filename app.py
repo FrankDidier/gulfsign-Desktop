@@ -541,6 +541,15 @@ class GulfSignApp(tk.Tk):
         self._cap_running = False
         self._cap_request_count = 0
 
+        self.capability_profile = {
+            "mode": "unknown",
+            "reason": "未检测",
+            "status0_total": 0,
+            "status5_total": 0,
+            "status6_total": 0,
+        }
+        self._pending_export_after_batch = False
+
         self._cfg = load_config()
 
         self._build_ui()
@@ -567,6 +576,9 @@ class GulfSignApp(tk.Tk):
         style.configure("Success.TLabel", foreground="#16a34a")
         style.configure("Error.TLabel", foreground="#dc2626")
         style.configure("Info.TLabel", foreground="#2563eb")
+        style.configure("RouteUnknown.TLabel", foreground="#6b7280")
+        style.configure("RouteWarn.TLabel", foreground="#d97706")
+        style.configure("RouteDirect.TLabel", foreground="#16a34a")
         style.configure("Header.TLabel", font=("", 11, "bold"))
 
         main = ttk.Frame(self, padding=8)
@@ -872,6 +884,32 @@ class GulfSignApp(tk.Tk):
         ttk.Label(
             r3, textvariable=self.var_stats, style="Info.TLabel"
         ).pack(side=tk.RIGHT)
+
+        r4 = ttk.Frame(frame)
+        r4.pack(fill=tk.X, pady=(4, 0))
+
+        self.var_route_mode = tk.StringVar(
+            value="能力路由: 未检测（登录后自动检测）"
+        )
+        self.lbl_route_mode = ttk.Label(
+            r4, textvariable=self.var_route_mode, style="RouteUnknown.TLabel",
+        )
+        self.lbl_route_mode.pack(side=tk.LEFT)
+
+        self.btn_smart_start = ttk.Button(
+            r4, text="⚡ 智能执行", command=self._on_start_smart_signing,
+        )
+        self.btn_smart_start.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_family_batch = ttk.Button(
+            r4, text="🏠 家庭批量发起", command=self._on_family_batch_initiate,
+        )
+        self.btn_family_batch.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_export_relay = ttk.Button(
+            r4, text="📦 导出接力包", command=self._on_export_relay_package,
+        )
+        self.btn_export_relay.pack(side=tk.RIGHT)
 
     def _build_log_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 运行日志 ", padding=4)
@@ -2046,9 +2084,432 @@ class GulfSignApp(tk.Tk):
                 self.var_team.set(self.client.team_name)
 
             self._save_current_config()
+            self._start_capability_router_check()
         else:
             self.lbl_login_status.configure(style="Error.TLabel")
             self._log("✗ %s" % msg, "err")
+
+    def _start_capability_router_check(self):
+        self.var_route_mode.set("能力路由: 检测中...")
+        self.lbl_route_mode.configure(style="RouteUnknown.TLabel")
+        self._log("能力路由检测: 开始（使用临时测试合同）", "info")
+
+        def worker():
+            profile = {
+                "mode": "blocked",
+                "reason": "当前权限下未发现直生效通道",
+                "status0_total": 0,
+                "status5_total": 0,
+                "status6_total": 0,
+            }
+            temp_cc = ""
+            try:
+                _, t0 = self.client.query_patients(status="0", page=1)
+                _, t5 = self.client.query_patients(status="5", page=1)
+                _, t6 = self.client.query_patients(status="6", page=1)
+                profile["status0_total"] = t0
+                profile["status5_total"] = t5
+                profile["status6_total"] = t6
+
+                if t6 > 0:
+                    profile["mode"] = "doctor_only"
+                    profile["reason"] = "可确认居民申请(6->0)，医生申请仍需外部通道"
+
+                pool, _ = self.client.query_patients(status="", page=1)
+                target = next((p for p in pool if not p.contract_code), None)
+                if target:
+                    r = self.client.initiate_signing(
+                        person_id=target.person_id,
+                        agreement_start="20260101",
+                        agreement_end="20261231",
+                        period="1",
+                    )
+                    if r.success and r.contract_code:
+                        temp_cc = r.contract_code
+                        r2 = self.client.confirm_signing(
+                            person_id=target.person_id,
+                            contract_code=r.contract_code,
+                            name=target.name,
+                        )
+                        if r2.success:
+                            profile["mode"] = "direct"
+                            profile["reason"] = "检测到医生申请可直接生效"
+                        else:
+                            if profile["mode"] == "blocked":
+                                profile["mode"] = "doctor_only"
+                            profile["reason"] = "医生申请不可直生效，建议接力包/高权限通道"
+            except Exception as e:
+                profile["mode"] = "blocked"
+                profile["reason"] = "检测异常: %s" % str(e)
+            finally:
+                if temp_cc:
+                    try:
+                        self.client.delete_signing(temp_cc)
+                    except Exception:
+                        pass
+            self.after(0, lambda: self._finish_capability_router_check(profile))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_capability_router_check(self, profile: dict):
+        self.capability_profile = profile
+        mode = profile.get("mode", "unknown")
+        reason = profile.get("reason", "")
+        self.var_route_mode.set(
+            "能力路由: %s | 0:%s 5:%s 6:%s"
+            % (
+                mode,
+                profile.get("status0_total", 0),
+                profile.get("status5_total", 0),
+                profile.get("status6_total", 0),
+            )
+        )
+        if mode == "direct":
+            self.lbl_route_mode.configure(style="RouteDirect.TLabel")
+        elif mode in ("doctor_only", "blocked"):
+            self.lbl_route_mode.configure(style="RouteWarn.TLabel")
+        else:
+            self.lbl_route_mode.configure(style="RouteUnknown.TLabel")
+        self._log("能力路由检测完成: %s (%s)" % (mode, reason), "info")
+
+    def _on_start_smart_signing(self):
+        mode = self.capability_profile.get("mode", "unknown")
+        if mode == "direct":
+            self._log("智能执行: 检测到直生效能力，走自动签约流程", "ok")
+            self._on_start_signing()
+            return
+        self._log(
+            "智能执行: 当前账号不具备5->0直生效能力，使用最快合法路径——",
+            "info",
+        )
+        self._log(
+            "  1) 家庭批量发起『医生申请』(ACTION=10) → 2) 单人补齐 → 3) 提示导出接力包",
+            "info",
+        )
+        self._pending_export_after_batch = True
+        self._on_family_batch_initiate()
+
+    def _on_family_batch_initiate(self):
+        if self._signing:
+            return
+        if not self.client.logged_in:
+            messagebox.showwarning("提示", "请先登录")
+            return
+        if not self.patients:
+            messagebox.showwarning("提示", "请先查询并选择居民")
+            return
+        targets = [p for p in self.patients if p.person_id in self.selected_ids]
+        if not targets:
+            messagebox.showwarning("提示", "请勾选要批量发起的居民")
+            return
+
+        eligible = [p for p in targets if p.contract_status not in ("0", "5", "6")]
+        skipped = len(targets) - len(eligible)
+        if not eligible:
+            messagebox.showwarning(
+                "提示",
+                "选中居民均已存在签约/申请记录，请先用『删除医生申请/作废已签约』清理或改用『智能执行』。",
+            )
+            return
+
+        msg_parts = [
+            "将先反查每位居民所属家庭档案，",
+            "同家庭成员合并走批量接口（ACTION=10），",
+            "未挂入家庭档案的对象自动回退为单人发起。",
+            "本批共 %d 人。" % len(eligible),
+        ]
+        if skipped:
+            msg_parts.append("跳过 %d 人（已存在签约/申请记录）。" % skipped)
+        msg_parts.append("注意：所有路径均产生『医生申请(STATUS=5)』，不会直接生效到 STATUS=0。")
+        msg_parts.append("是否继续？")
+        if not messagebox.askyesno("家庭批量发起", "\n".join(msg_parts)):
+            return
+
+        doctor = self.var_doctor.get().strip()
+        team = self.var_team.get().strip()
+        pop_code = self._get_pop_type_code()
+        agree_start = self.var_agree_start.get().strip()
+        agree_end = self.var_agree_end.get().strip()
+        try:
+            delay = float(self.var_delay.get())
+        except ValueError:
+            delay = 0.5
+
+        self._signing = True
+        self._stop_event.clear()
+        self._sign_success = 0
+        self._sign_fail = 0
+        self._sign_total = len(eligible)
+        self._sign_start_time = time.time()
+        self.btn_start.configure(state=tk.DISABLED)
+        self.btn_pause.configure(state=tk.DISABLED)
+        self.btn_stop.configure(state=tk.NORMAL)
+        self.btn_login.configure(state=tk.DISABLED)
+        self.btn_query.configure(state=tk.DISABLED)
+        self.btn_query_all.configure(state=tk.DISABLED)
+        self.progress.configure(maximum=len(eligible), value=0)
+        self.var_progress_text.set("0 / %d" % len(eligible))
+        self.var_stats.set("")
+        self._log("=" * 50, "info")
+        self._log("家庭批量发起: %d 人，先反查家庭归属..." % len(eligible), "info")
+
+        def worker():
+            family_groups: dict = {}
+            singletons: list = []
+            for p in eligible:
+                if self._stop_event.is_set():
+                    break
+                fg, _head = self.client.find_family_guid(p.person_id, p.name)
+                if fg:
+                    family_groups.setdefault(fg, []).append(p)
+                else:
+                    singletons.append(p)
+
+            self.after(
+                0,
+                lambda fg=len(family_groups), sg=len(singletons): self._log(
+                    "  归属反查完成：%d 个家庭组，%d 人无家庭归属（将单人发起）"
+                    % (fg, sg), "info",
+                ),
+            )
+
+            done = 0
+            chunk_size = 8
+
+            for family_guid, members in family_groups.items():
+                if self._stop_event.is_set():
+                    break
+                chunks = [
+                    members[i:i + chunk_size]
+                    for i in range(0, len(members), chunk_size)
+                ]
+                for batch in chunks:
+                    if self._stop_event.is_set():
+                        break
+                    pids = [m.person_id for m in batch]
+                    t_start = time.time()
+                    ok, msg2, created = self.client.family_batch_initiate(
+                        person_ids=pids,
+                        family_guid=family_guid,
+                        team_name=team,
+                        doctor_name=doctor,
+                        service_type=pop_code,
+                        agreement_start=agree_start,
+                        agreement_end=agree_end,
+                        contact_phone="13800000000",
+                    )
+                    elapsed = time.time() - t_start
+                    code_map = {c["person_id"]: c for c in created}
+                    if ok:
+                        self.after(
+                            0,
+                            lambda fg=family_guid, n=len(pids), e=elapsed, m=msg2: (
+                                self._log(
+                                    "  ✓ 家庭 %s: %d 人 (%.1fs) — %s"
+                                    % (fg[:8], n, e, m), "ok",
+                                )
+                            ),
+                        )
+                        for p in batch:
+                            done += 1
+                            cc_info = code_map.get(p.person_id)
+                            success = bool(cc_info)
+                            if success:
+                                self._sign_success += 1
+                            else:
+                                self._sign_fail += 1
+                            self.after(
+                                0,
+                                lambda d=done, p=p, s=success, ci=cc_info: (
+                                    self._update_family_batch_row(d, p, s, ci)
+                                ),
+                            )
+                    else:
+                        self.after(
+                            0,
+                            lambda fg=family_guid, m=msg2: self._log(
+                                "  ! 家庭 %s 批量失败 (%s)，回退为单人"
+                                % (fg[:8], m), "warn",
+                            ),
+                        )
+                        singletons.extend(batch)
+                    if delay > 0:
+                        time.sleep(delay)
+
+            for p in singletons:
+                if self._stop_event.is_set():
+                    break
+                r = self.client.initiate_signing(
+                    person_id=p.person_id,
+                    team_name=team,
+                    doctor_name=doctor,
+                    service_type=pop_code,
+                    agreement_start=agree_start,
+                    agreement_end=agree_end,
+                )
+                done += 1
+                success = r.success and bool(r.contract_code)
+                if success:
+                    self._sign_success += 1
+                    cc_info = {
+                        "person_id": p.person_id,
+                        "contract_code": r.contract_code,
+                        "status_text": "医生申请",
+                    }
+                else:
+                    self._sign_fail += 1
+                    cc_info = None
+                self.after(
+                    0,
+                    lambda d=done, p=p, s=success, ci=cc_info: (
+                        self._update_family_batch_row(d, p, s, ci)
+                    ),
+                )
+                if delay > 0:
+                    time.sleep(delay)
+
+            self.after(0, self._signing_finished)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_family_batch_row(self, done, patient, success, cc_info):
+        children = self.tree.get_children()
+        if patient.person_id in children:
+            self.tree.item(
+                patient.person_id,
+                tags=("signed_ok" if success else "signed_fail",),
+            )
+        if success and cc_info:
+            patient.contract_code = cc_info.get("contract_code", "")
+            patient.contract_status = "5"
+            patient.status_text = cc_info.get("status_text", "医生申请")
+        self.progress.configure(value=done)
+        self.var_progress_text.set("%d / %d" % (done, self._sign_total))
+        elapsed = time.time() - self._sign_start_time
+        speed = elapsed / done if done > 0 else 0
+        self.var_stats.set(
+            "成功: %d  失败: %d  速度: %.2f秒/人"
+            % (self._sign_success, self._sign_fail, speed)
+        )
+
+    def _on_export_relay_package(self):
+        if not self.patients:
+            messagebox.showwarning("提示", "请先查询并选择居民")
+            return
+        targets = [p for p in self.patients if p.person_id in self.selected_ids]
+        if not targets:
+            messagebox.showwarning("提示", "请选择要导出的居民")
+            return
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP 文件", "*.zip"), ("所有文件", "*.*")],
+            initialfile="签约接力包_%s.zip" % datetime.now().strftime("%Y%m%d_%H%M"),
+        )
+        if not path:
+            return
+
+        try:
+            import csv
+            import io
+            import zipfile
+
+            rows = []
+            for i, p in enumerate(targets, 1):
+                rows.append([
+                    i, p.name, p.id_card, p.person_id,
+                    p.contract_status, p.status_text, p.contract_code,
+                    self.var_agree_start.get().strip() or "自动",
+                    self.var_agree_end.get().strip() or "自动",
+                    self.var_doctor.get().strip() or p.signing_doctor,
+                    self.var_team.get().strip() or p.signing_team,
+                    "目标: STATUS=0 已签约有效",
+                ])
+
+            csv_buf = io.StringIO()
+            writer = csv.writer(csv_buf)
+            writer.writerow([
+                "序号", "姓名", "身份证号", "PERSONID",
+                "当前状态码", "当前状态", "合同号",
+                "协议开始", "协议结束", "签约医生", "签约团队", "处理目标",
+            ])
+            writer.writerows(rows)
+
+            manifest = {
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "source_account": self.var_account.get().strip(),
+                "source_org": self.var_org.get().strip() or self.client.org_code,
+                "capability_profile": self.capability_profile,
+                "target_count": len(targets),
+                "goal": "将医生申请/未签约对象处理为 STATUS=0（已签约有效）",
+            }
+            readme = (
+                "签约接力包说明\n"
+                "====================\n"
+                "用途：将本机已发起『医生申请(STATUS=5)』的对象交由有权限账号或外部团队\n"
+                "      执行最终落库（STATUS=0）。\n\n"
+                "包内文件：\n"
+                "  - relay_queue.csv  待处理居民列表（含 PERSONID/合同号/协议期/医生/团队）\n"
+                "  - manifest.json    来源账号、能力检测结果、生成时间等元数据\n"
+                "  - 厂商升级包_技术证据_v2.md (如附带) 当前账号能力差异说明\n\n"
+                "操作建议：\n"
+                "  1) 处理方使用其授权账号登录公卫3.0；\n"
+                "  2) 按 relay_queue.csv 的 PERSONID/合同号定位记录；\n"
+                "  3) 在其权限范围内执行确认/审核或后台落库流程。\n\n"
+                "注意：\n"
+                "  - 本机账号已经历完整能力面探测，无 5->0 通道。\n"
+                "  - 若处理方仅有同等权限账号，请先与厂商确认其授权差异。\n"
+            )
+
+            from collections import OrderedDict
+            grouped = OrderedDict()
+            for p in targets:
+                key = (p.signing_team or "未指派团队", p.signing_doctor or "未指派医生")
+                grouped.setdefault(key, []).append(p)
+
+            family_csv = io.StringIO()
+            fwriter = csv.writer(family_csv)
+            fwriter.writerow(["签约团队", "签约医生", "人数", "PERSONID列表", "合同号列表"])
+            for (tm, dr), group in grouped.items():
+                fwriter.writerow([
+                    tm, dr, len(group),
+                    "|".join(p.person_id for p in group),
+                    "|".join(p.contract_code for p in group if p.contract_code),
+                ])
+
+            evidence_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "厂商升级包_技术证据_v2.md",
+            )
+            evidence_bytes = None
+            if os.path.isfile(evidence_path):
+                try:
+                    with open(evidence_path, "rb") as ef:
+                        evidence_bytes = ef.read()
+                except Exception:
+                    evidence_bytes = None
+
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("relay_queue.csv", csv_buf.getvalue().encode("utf-8-sig"))
+                zf.writestr("relay_by_team.csv", family_csv.getvalue().encode("utf-8-sig"))
+                zf.writestr(
+                    "manifest.json",
+                    json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+                zf.writestr("README.txt", readme.encode("utf-8"))
+                if evidence_bytes:
+                    zf.writestr("厂商升级包_技术证据_v2.md", evidence_bytes)
+
+            attached = " + 厂商证据" if evidence_bytes else ""
+            self._log(
+                "接力包导出成功: %s (%d人, 团队%d个%s)"
+                % (path, len(targets), len(grouped), attached),
+                "ok",
+            )
+            messagebox.showinfo("导出成功", "已导出接力包：\n%s" % path)
+        except Exception as e:
+            self._log("导出接力包失败: %s" % e, "err")
+            messagebox.showerror("导出失败", str(e))
 
     # ================================================================
     # Tab 1: Query
@@ -2428,6 +2889,15 @@ class GulfSignApp(tk.Tk):
             ),
             "ok" if self._sign_fail == 0 else "warn",
         )
+
+        if getattr(self, "_pending_export_after_batch", False):
+            self._pending_export_after_batch = False
+            if self._sign_success > 0 and messagebox.askyesno(
+                "导出接力包",
+                "已成功发起 %d 条医生申请。\n是否立即导出『接力包』交给有权限处理方？"
+                % self._sign_success,
+            ):
+                self._on_export_relay_package()
 
     def _on_pause(self):
         if self._paused:

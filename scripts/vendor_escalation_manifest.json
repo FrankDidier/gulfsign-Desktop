@@ -1,0 +1,76 @@
+{
+  "package_name": "vendor-escalation-evidence-v2",
+  "generated_for_goal": "实现无居民端配合场景下 STATUS=0 自动生效签约",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "reports": [
+    {
+      "path": "scripts/ph3_b0105_action_synth_probe_report.json",
+      "purpose": "直接验证 B0105 动作是否可将 5->0",
+      "key_assertion": "any_status_to_zero=false"
+    },
+    {
+      "path": "scripts/ph3_linked_system_status_probe_report.json",
+      "purpose": "跨模块处理器联动突变探测",
+      "key_assertion": "any_to_zero=false"
+    },
+    {
+      "path": "scripts/ph3_permission_surface_diff_report.json",
+      "purpose": "上下文切换后权限面差分",
+      "key_assertion": "未出现签约登记/代签/批量导入/签约审核"
+    },
+    {
+      "path": "scripts/ph3_status_origin_diff_report.json",
+      "purpose": "既有 STATUS=0 与临时 STATUS=5 来源差异",
+      "key_assertion": "字段指纹差异支持不同后台流程假设"
+    },
+    {
+      "path": "scripts/ph3_handler_explorer_report.json",
+      "purpose": "处理器动作枚举与响应证据",
+      "key_assertion": "未发现可用 5->0 处理动作"
+    },
+    {
+      "path": "scripts/ph3_endpoint_cartography_report_v2.json",
+      "purpose": "入口/处理器测绘证据",
+      "key_assertion": "未发现代签专属入口"
+    },
+    {
+      "path": "scripts/ph3_b0105_uiflow_probe_report.json",
+      "purpose": "从 B0105 页面动态提取 UI 流程动作并实测",
+      "key_assertion": "UI 暴露动作对 STATUS=5 均无法到 0"
+    },
+    {
+      "path": "scripts/ph3_apiapplication_deep_probe_report.json",
+      "purpose": "ApiApplication 上传/申请/查询/审核链路重建",
+      "key_assertion": "申请可回执成功但查询持续为空，审核入口不可达"
+    },
+    {
+      "path": "scripts/ph3_status0_fingerprint_mining_report.json",
+      "purpose": "既有 STATUS=0 指纹聚类与渠道假设",
+      "key_assertion": "样本聚为少数指纹族，支持后台批处理渠道假设"
+    },
+    {
+      "path": "scripts/ph3_browser_network_capture_report.json",
+      "purpose": "浏览器实采 B0105 页面网络请求",
+      "key_assertion": "未见新增可用 5->0 通道；核心 grid 请求疑似位于 iframe 上下文"
+    },
+    {
+      "path": "scripts/ph3_status6_creation_probe_report.json",
+      "purpose": "穷举验证『未签约 → 居民申请』是否可由 3.0 系统侧产生",
+      "key_assertion": "所有 ACTION/字段组合均无法产生 STATUS=6；服务端硬性强制为 STATUS=5"
+    }
+  ],
+  "runner_scripts": [
+    "scripts/ph3_b0105_action_synth_probe.py",
+    "scripts/ph3_linked_system_status_probe.py",
+    "scripts/ph3_permission_surface_diff.py",
+    "scripts/ph3_status_origin_diff.py",
+    "scripts/ph3_handler_explorer.py",
+    "scripts/ph3_endpoint_cartography.py",
+    "scripts/ph3_capability_probe.py",
+    "scripts/ph3_b0105_uiflow_probe.py",
+    "scripts/ph3_apiapplication_deep_probe.py",
+    "scripts/ph3_status0_fingerprint_mining.py"
+  ],
+  "human_summary": "厂商升级包_技术证据_v2.md"
+}
+

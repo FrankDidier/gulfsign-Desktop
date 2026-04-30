@@ -1,0 +1,213 @@
+{
+  "ts": "2026-04-28T19:54:24Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "account": "430726…",
+  "max_nodes": 120,
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "nodes": [
+    {
+      "path": "/FormMain.aspx",
+      "http_status": 200,
+      "content_length": 10316,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html xmlns=\"http://www.w3.org/1999/x…"
+    },
+    {
+      "path": "/Sys_JCWS/b0105/Pg_View_B0105.aspx",
+      "http_status": 200,
+      "content_length": 22209,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">    <html xmlns=\"http://www.w3.org/1999…"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_View_B0105.aspx",
+      "http_status": 200,
+      "content_length": 22209,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">    <html xmlns=\"http://www.w3.org/1999…"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_Insert_B0105.aspx",
+      "http_status": 200,
+      "content_length": 2338,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html>  <head>      <title>          …"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_Queren_Status.aspx",
+      "http_status": 200,
+      "content_length": 3843,
+      "snippet": "<!DOCTYPE html>    <html xmlns=\"http://www.w3.org/1999/xhtml\">  <head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" /><title>  \t拒绝签约  </tit…"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Pg_View_TBLBUS_ApiApplication.aspx",
+      "http_status": 200,
+      "content_length": 13603,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">    <html xmlns=\"http://www.w3.org/1999…"
+    },
+    {
+      "path": "/Sys_JCWS/TBLSYS_ExportExcel/Pg_View_TBLSYS_ExportExcel.aspx",
+      "http_status": 200,
+      "content_length": 9874,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html xmlns=\"http://www.w3.org/1999/x…"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_Edit_B0105.aspx?GUID=a676a3f4-882a-4773-81b4-a980b1e81232&PERSONID=465038444",
+      "http_status": 200,
+      "content_length": 26887,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">   <html xmlns=\"http://www.w3.org/1999/…"
+    },
+    {
+      "path": "/ashx/LoginHandler.ashx?ACTION=CONNECTPROLONG&t=",
+      "http_status": 200,
+      "content_length": 21,
+      "snippet": "{\"opType\":0,\"msg\":\"\"}"
+    },
+    {
+      "path": "/ashx/LoginHandler.ashx?action=CHANGEPWD",
+      "http_status": 200,
+      "content_length": 43,
+      "snippet": "{\"opType\":1,\"msg\":\"老密码不能为空.\"}"
+    },
+    {
+      "path": "/js/appcommon.js?v=20241128",
+      "http_status": 200,
+      "content_length": 37050,
+      "snippet": "var _0x357211 = _0x2d6e; (function (_0x44b792, _0xc7e4de) { var _0x17a809 = _0x2d6e, _0xc62c4d = _0x44b792(); while (!![]) { try { var _0x4a7f0f = parseInt(_0x1…"
+    },
+    {
+      "path": "/js/codebase/dhtmlx.js?v=1.0",
+      "http_status": 200,
+      "content_length": 2588200,
+      "snippet": "/* Product Name: dhtmlxSuite Version: 5.1.0 Edition: Professional License: content of this file is covered by DHTMLX Commercial or Enterprise license. Usage wit…"
+    },
+    {
+      "path": "/js/index2.js?v=1.5",
+      "http_status": 200,
+      "content_length": 5311,
+      "snippet": "function pageLoad() {      //#region layout      dhxWins = new dhtmlXWindows();        dhxWinsFloat = new dhtmlXWindows();      //dhxWins.setImagePath(\"js/codeb…"
+    },
+    {
+      "path": "/js/jquery/jquery.js",
+      "http_status": 200,
+      "content_length": 189680,
+      "snippet": "/*! jQuery v1.7.2 jquery.com | jquery.org/license */ (function(a,b){function cy(a){return f.isWindow(a)?a:a.nodeType===9?a.defaultView||a.parentWindow:!1}functi…"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_Change_Status.aspx",
+      "http_status": 200,
+      "content_length": 2338,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html>  <head>      <title>          …"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Pg_Queren_Status.aspx?etc=",
+      "http_status": 200,
+      "content_length": 3843,
+      "snippet": "<!DOCTYPE html>    <html xmlns=\"http://www.w3.org/1999/xhtml\">  <head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" /><title>  \t拒绝签约  </tit…"
+    },
+    {
+      "path": "/Sys_JCWS/CommonForm/Pg_Input_Security_Password.aspx",
+      "http_status": 200,
+      "content_length": 2410,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html xmlns=\"http://www.w3.org/1999/x…"
+    },
+    {
+      "path": "/Sys_JCWS/JKDA/Page_Index_B0105.aspx",
+      "http_status": 200,
+      "content_length": 2338,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html>  <head>      <title>          …"
+    },
+    {
+      "path": "/Sys_JCWS/Sys_JCWS/TBLSYS_ExportExcel/Pg_Export_Excel.aspx?etc=",
+      "http_status": 404,
+      "content_length": 3482,
+      "snippet": "<!DOCTYPE html>  <html>      <head>          <title>无法找到资源。</title>          <meta name=\"viewport\" content=\"width=device-width\" />          <style>           bo…"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Pg_Edit_TBLBUS_ApiApplication.aspx?etc=",
+      "http_status": 200,
+      "content_length": 14374,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">   <html xmlns=\"http://www.w3.org/1999/…"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Pg_File_TBLBUS_ApiApplication.aspx?etc=",
+      "http_status": 200,
+      "content_length": 2346,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">  <html>  <head>      <title>          …"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Pg_Insert_TBLBUS_ApiApplication.aspx?etc=",
+      "http_status": 200,
+      "content_length": 13623,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">   <html xmlns=\"http://www.w3.org/1999/…"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Pg_ShengHe_TBLBUS_ApiApplication.aspx?etc=",
+      "http_status": 200,
+      "content_length": 13333,
+      "snippet": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">   <html xmlns=\"http://www.w3.org/1999/…"
+    },
+    {
+      "path": "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+      "http_status": 200,
+      "content_length": 0,
+      "snippet": ""
+    },
+    {
+      "path": "/Sys_CunZhiBao/RenYuanDangKa/PagePersonCard.aspx?GUID=",
+      "http_status": 500,
+      "content_length": 5786,
+      "snippet": "<!DOCTYPE html>  <html>      <head>          <title>未将对象引用设置到对象的实例。</title>          <meta name=\"viewport\" content=\"width=device-width\" />          <style>     …"
+    },
+    {
+      "path": "/js/jquery/mm/llmdnfff34.min.js",
+      "http_status": 200,
+      "content_length": 30007,
+      "snippet": "var _0x5ac7=['wrAdwrM1wrrCrw==','wpYBVVoFw78=','GcKbOsO3w5vCuj3CuXXCg0TChw==','wpALUlM=','wpAQwqTDlwXCoA==','bWDDk8OdwoFwwq7CpnVww7U=','OMKeZDw3Lg==','wrUMw77Dp…"
+    },
+    {
+      "path": "/ashx/LoginHandler.ashx?action=GETMENU",
+      "http_status": 200,
+      "content_length": 21432,
+      "snippet": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><menu><item id='健康档案' text='健康档案' img=''><item id='新冠疫苗数据纠错' text='新冠疫苗数据纠错' img=''><userdata name=\"href_link\"><![CDATA[  …"
+    },
+    {
+      "path": "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+      "http_status": 200,
+      "content_length": 0,
+      "snippet": ""
+    }
+  ],
+  "visited_count": 28,
+  "handlers": {
+    "/ashx/LoginHandler.ashx?ACTION=CONNECTPROLONG&t=": {
+      "http_status": 200,
+      "content_length": 21,
+      "actions_found": []
+    },
+    "/ashx/LoginHandler.ashx?action=CHANGEPWD": {
+      "http_status": 200,
+      "content_length": 43,
+      "actions_found": []
+    },
+    "/Sys_JCWS/B0105/Do_B0105_Handler.ashx": {
+      "http_status": 200,
+      "content_length": 0,
+      "actions_found": []
+    },
+    "/ashx/LoginHandler.ashx?action=GETMENU": {
+      "http_status": 200,
+      "content_length": 21432,
+      "actions_found": []
+    },
+    "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx": {
+      "http_status": 200,
+      "content_length": 0,
+      "actions_found": []
+    }
+  },
+  "probe_candidates": [
+    "/Sys_JCWS/ApiApplication/Do_ApiApplication_Handler.ashx",
+    "/Sys_JCWS/B0105/Do_B0105_Handler.ashx",
+    "/ashx/LoginHandler.ashx?ACTION=CONNECTPROLONG&t=",
+    "/ashx/LoginHandler.ashx?action=CHANGEPWD",
+    "/ashx/LoginHandler.ashx?action=GETMENU"
+  ]
+}

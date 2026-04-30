@@ -1,0 +1,352 @@
+{
+  "ts": "2026-04-28T19:54:26Z",
+  "base_url": "https://ggws.hnhfpc.gov.cn",
+  "account": "430726…",
+  "actions": [
+    "2",
+    "9",
+    "DOUPDATE",
+    "UPDATE",
+    "DOSAVE",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20"
+  ],
+  "login_ok": true,
+  "login_message": "登录成功 — 430726000001010WS",
+  "target_person": {
+    "person_id": "465335104",
+    "name": "张厚平"
+  },
+  "cases": [
+    {
+      "action": "2",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "f9ad4386-7a33-430c-b579-ecb6496b6a7c",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>f9ad4386-7a33-430c-b579-ecb6496b6a7c</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>f9ad4386-7a33-430c-b579-ecb6496b6a7c</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "9",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "82497558-2a97-4ae1-8e8e-6243a09f6c72",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>82497558-2a97-4ae1-8e8e-6243a09f6c72</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>82497558-2a97-4ae1-8e8e-6243a09f6c72</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "DOUPDATE",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "746b9445-257c-4204-aaa8-29cc3d23d2c7",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>746b9445-257c-4204-aaa8-29cc3d23d2c7</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>746b9445-257c-4204-aaa8-29cc3d23d2c7</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "UPDATE",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "4382586e-74a8-46cb-9d28-0d7f6d016511",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>4382586e-74a8-46cb-9d28-0d7f6d016511</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>4382586e-74a8-46cb-9d28-0d7f6d016511</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "DOSAVE",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "3861b695-924f-4ecb-8350-953ab2708133",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>3861b695-924f-4ecb-8350-953ab2708133</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>3861b695-924f-4ecb-8350-953ab2708133</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "12",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "3f6ffbcc-7352-40ab-ac86-688e3078c6c6",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>3f6ffbcc-7352-40ab-ac86-688e3078c6c6</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>3f6ffbcc-7352-40ab-ac86-688e3078c6c6</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "13",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "1640214a-c397-4c95-a0bd-42bc56483881",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>1640214a-c397-4c95-a0bd-42bc56483881</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>1640214a-c397-4c95-a0bd-42bc56483881</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "14",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "320b99b0-557f-4589-88a5-f7f090d3e5af",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>320b99b0-557f-4589-88a5-f7f090d3e5af</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>320b99b0-557f-4589-88a5-f7f090d3e5af</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "15",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "aac2f038-5206-420f-a845-ebfe411e6b81",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>aac2f038-5206-420f-a845-ebfe411e6b81</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>aac2f038-5206-420f-a845-ebfe411e6b81</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "16",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "eacda31b-9dfb-4561-8eca-5aea39c7a9ef",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>eacda31b-9dfb-4561-8eca-5aea39c7a9ef</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>eacda31b-9dfb-4561-8eca-5aea39c7a9ef</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "17",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "516c55a2-b254-48f7-86c4-b411baddfad5",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>516c55a2-b254-48f7-86c4-b411baddfad5</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>516c55a2-b254-48f7-86c4-b411baddfad5</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "18",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "36f1ed45-57c4-4099-ad68-c2ec39b5e15b",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>36f1ed45-57c4-4099-ad68-c2ec39b5e15b</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>36f1ed45-57c4-4099-ad68-c2ec39b5e15b</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "19",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "ed3bd823-e8e7-4c29-9bd3-eb5d8c35160f",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>ed3bd823-e8e7-4c29-9bd3-eb5d8c35160f</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>ed3bd823-e8e7-4c29-9bd3-eb5d8c35160f</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    },
+    {
+      "action": "20",
+      "create_success": true,
+      "create_error": "",
+      "contract_code": "bdc499ae-9423-4c3d-9292-2fa5cea9542f",
+      "status_before": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>bdc499ae-9423-4c3d-9292-2fa5cea9542f</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "attempt_edit_http": 200,
+      "attempt_edit_resp": "",
+      "attempt_force_http": 200,
+      "attempt_force_resp": "",
+      "attempt_mini_http": 200,
+      "attempt_mini_resp": "",
+      "status_after": {
+        "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><data><STATUS>5</STATUS><REMARK><![CDATA[]]></REMARK><GUID>bdc499ae-9423-4c3d-9292-2fa5cea9542f</GUID><PERSONID>465335104</PERSONID></data>",
+        "status": "5"
+      },
+      "status_changed": false,
+      "status_to_zero": false,
+      "cleanup_deleted": true
+    }
+  ],
+  "any_status_to_zero": false
+}
