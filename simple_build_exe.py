@@ -69,6 +69,13 @@ def create_exe():
         "--onefile",
         "--windowed",  # 不显示控制台窗口
         "--clean",
+        "--hidden-import=Crypto",
+        "--hidden-import=Crypto.Cipher",
+        "--hidden-import=Crypto.PublicKey",
+        "--hidden-import=Crypto.Signature",
+        "--hidden-import=Crypto.Hash",
+        "--hidden-import=Crypto.Util",
+        "--hidden-import=Crypto.Random",
         "--add-data=gulfsign_config.json:.",
         "--add-data=使用说明.txt:.",
         "--add-data=使用说明_最终版.txt:.",
