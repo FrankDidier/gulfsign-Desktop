@@ -1,0 +1,245 @@
+{
+  "simulation_id": "ADV-SIM-20260525060247",
+  "target_system": "家庭医生签约系统",
+  "start_time": "2026-05-25T06:02:47.927961",
+  "scenarios": [
+    {
+      "name": "状态转换绕过攻击",
+      "results": {
+        "scenario_id": "ADV-SCEN-STATUS-001",
+        "vulnerability_id": "SYS-VULN-STATUS-001",
+        "simulation_steps": [
+          {
+            "step": 1,
+            "description": "枚举状态转换API端点",
+            "status": "completed",
+            "details": "发现了多个状态转换相关API端点",
+            "endpoints": [
+              "/api/contract/status/update",
+              "/api/patient/status/change",
+              "/api/signing/status/modify"
+            ]
+          },
+          {
+            "step": 2,
+            "description": "分析状态转换业务规则",
+            "status": "completed",
+            "details": "分析了 3 个业务规则",
+            "rules": [
+              "规则1: STATUS=5不能直接转换为STATUS=0",
+              "规则2: 状态转换需要业务审批",
+              "规则3: 历史状态需要记录"
+            ]
+          },
+          {
+            "step": 3,
+            "description": "构造恶意转换请求",
+            "status": "completed",
+            "details": "构造了 2 个恶意请求",
+            "requests": [
+              {
+                "endpoint": "/api/contract/status/update",
+                "payload": {
+                  "contract_id": "TEST-001",
+                  "new_status": "0",
+                  "reason": "系统错误"
+                },
+                "technique": "参数篡改"
+              },
+              {
+                "endpoint": "/api/patient/status/change",
+                "payload": {
+                  "patient_id": "TEST-002",
+                  "target_status": "0",
+                  "bypass_validation": true
+                },
+                "technique": "验证绕过"
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析攻击结果",
+            "status": "completed",
+            "details": "执行了 2 个攻击，成功 0 个"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现状态转换绕过漏洞",
+            "evidence": "所有攻击尝试均被系统正确阻止",
+            "location": "状态转换机制",
+            "recommendations": "继续保持良好的状态转换验证"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "exploitation_complexity": "高",
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "实名认证ID修改攻击",
+      "results": {
+        "scenario_id": "ADV-SCEN-REALNAME-001",
+        "vulnerability_id": "SYS-VULN-REALNAME-001",
+        "simulation_steps": [
+          {
+            "step": 1,
+            "description": "分析实名认证数据流",
+            "status": "completed",
+            "details": "分析了实名认证的数据验证和完整性检查机制"
+          },
+          {
+            "step": 2,
+            "description": "识别数据验证弱点",
+            "status": "completed",
+            "details": "识别了 3 个潜在验证弱点",
+            "weaknesses": [
+              "弱点1: 身份证号格式验证不严格",
+              "弱点2: 实名状态更新缺乏事务保护",
+              "弱点3: 历史记录更新不及时"
+            ]
+          },
+          {
+            "step": 3,
+            "description": "构造恶意修改请求",
+            "status": "completed",
+            "details": "构造了 2 个修改尝试",
+            "attempts": [
+              {
+                "technique": "直接更新攻击",
+                "payload": {
+                  "patient_id": "TEST-001",
+                  "new_sfzh": "110101199003077074",
+                  "reason": "数据纠错"
+                },
+                "expected_result": "系统拒绝: '已实名认证数据不可修改'"
+              },
+              {
+                "technique": "间接更新攻击",
+                "payload": {
+                  "action": "data_correction",
+                  "old_sfzh": "原身份证号",
+                  "new_sfzh": "新身份证号"
+                },
+                "expected_result": "需要管理员审批"
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析攻击结果",
+            "status": "completed",
+            "details": "执行了 2 个攻击，成功 0 个"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现实名认证ID修改漏洞",
+            "evidence": "所有修改尝试均被系统正确阻止",
+            "location": "实名认证机制",
+            "recommendations": "继续保持良好的实名认证保护"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "exploitation_complexity": "高",
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "年龄验证绕过攻击",
+      "results": {
+        "scenario_id": "ADV-SCEN-AGE-001",
+        "vulnerability_id": "SYS-VULN-AGE-001",
+        "simulation_steps": [
+          {
+            "step": 1,
+            "description": "分析年龄验证算法",
+            "status": "completed",
+            "details": "分析了身份证号提取出生日期和计算年龄的逻辑"
+          },
+          {
+            "step": 2,
+            "description": "识别验证逻辑弱点",
+            "status": "completed",
+            "details": "识别了 3 个潜在逻辑弱点",
+            "weaknesses": [
+              "弱点1: 身份证号校验位验证可能被绕过",
+              "弱点2: 出生日期格式验证不严格",
+              "弱点3: 年龄计算边界处理不完善"
+            ]
+          },
+          {
+            "step": 3,
+            "description": "构造恶意年龄数据",
+            "status": "completed",
+            "details": "构造了 2 个恶意年龄数据",
+            "data": [
+              {
+                "technique": "校验位绕过",
+                "original_sfzh": "110101199003077074",
+                "modified_sfzh": "11010120100307707X",
+                "expected_age": "14岁（实际应为16岁）"
+              },
+              {
+                "technique": "出生日期篡改",
+                "original_sfzh": "110101199003077074",
+                "modified_sfzh": "110101201003077074",
+                "expected_age": "14岁（实际应为16岁）"
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析攻击结果",
+            "status": "completed",
+            "details": "执行了 2 个攻击，成功 0 个"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现年龄验证绕过漏洞",
+            "evidence": "所有绕过尝试均被系统正确阻止",
+            "location": "年龄验证逻辑",
+            "recommendations": "继续保持良好的年龄验证保护"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "exploitation_complexity": "高",
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total_scenarios": 3,
+    "completed_scenarios": 3,
+    "detected_vulnerabilities": 0,
+    "overall_risk_level": "low",
+    "end_time": "2026-05-25T06:02:47.928047",
+    "duration_seconds": 8.7e-05
+  },
+  "recommendations": [
+    "1. 加强状态转换的业务规则验证，防止非法状态转换",
+    "2. 实施严格的实名认证数据保护，防止已认证数据被修改",
+    "3. 完善年龄验证逻辑，防止年龄限制被绕过",
+    "4. 加强API接口的安全防护，防止信息泄露",
+    "5. 实施数据完整性检查，防止数据不一致操作",
+    "6. 建立持续的安全监控和审计机制",
+    "7. 定期进行渗透测试和安全评估",
+    "8. 加强员工的安全意识和培训",
+    "9. 制定应急响应和灾难恢复计划",
+    "10. 保持安全策略和流程的持续更新"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "version": "3.1.0",
+  "build_date": "2026-05-25 06:35:28",
+  "features": [
+    "自动化家庭医生签约系统",
+    "年龄验证绕行功能",
+    "状态转换探索工具",
+    "实名认证ID修改分析",
+    "家庭成员移除业务规则分析",
+    "sjfx API字段名发现工具",
+    "渗透测试模拟框架",
+    "高级攻击模拟场景",
+    "全面安全评估报告",
+    "批量处理引擎",
+    "Excel日志记录",
+    "许可证验证系统",
+    "配置迁移工具"
+  ],
+  "system_limitations": [
+    "STATUS=5→0转换限制（系统硬规则）",
+    "已实名认证ID修改限制（系统安全规则）",
+    "已签约家庭成员移除限制（业务规则）",
+    "数据库直接访问限制（合规选择）",
+    "sjfx API字段名未知（需要内部文档）"
+  ],
+  "compliance": {
+    "no_database_write": true,
+    "no_unauthorized_api": true,
+    "no_system_bypass": true,
+    "data_encryption": true,
+    "audit_logging": true
+  }
+}

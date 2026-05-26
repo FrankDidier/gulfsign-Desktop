@@ -1,0 +1,417 @@
+{
+  "summary": {
+    "total_discovery_techniques": 12,
+    "total_field_candidates": 2318,
+    "total_discovery_results": 12,
+    "successful_techniques": 8,
+    "discovered_fields_count": 18,
+    "exploration_date": "2026-05-25 05:02:26"
+  },
+  "discovery_techniques": {
+    "DT001": {
+      "name": "官方API文档获取",
+      "type": "官方渠道",
+      "description": "通过正规渠道获取官方API文档",
+      "success_probability": "high",
+      "compliance_status": "compliant",
+      "technical_complexity": "low"
+    },
+    "DT002": {
+      "name": "合作伙伴渠道",
+      "type": "官方渠道",
+      "description": "通过合作伙伴获取API信息",
+      "success_probability": "medium",
+      "compliance_status": "compliant",
+      "technical_complexity": "low"
+    },
+    "DT003": {
+      "name": "网络流量分析",
+      "type": "技术分析",
+      "description": "分析系统网络流量获取字段名",
+      "success_probability": "high",
+      "compliance_status": "questionable",
+      "technical_complexity": "medium"
+    },
+    "DT004": {
+      "name": "JavaScript源代码分析",
+      "type": "技术分析",
+      "description": "分析前端JavaScript代码",
+      "success_probability": "medium",
+      "compliance_status": "questionable",
+      "technical_complexity": "medium"
+    },
+    "DT005": {
+      "name": "移动应用逆向工程",
+      "type": "逆向工程",
+      "description": "逆向分析移动应用获取API信息",
+      "success_probability": "high",
+      "compliance_status": "non-compliant",
+      "technical_complexity": "high"
+    },
+    "DT006": {
+      "name": "桌面应用逆向工程",
+      "type": "逆向工程",
+      "description": "逆向分析桌面客户端应用",
+      "success_probability": "medium",
+      "compliance_status": "non-compliant",
+      "technical_complexity": "high"
+    },
+    "DT007": {
+      "name": "公开API文档挖掘",
+      "type": "合规替代",
+      "description": "挖掘系统公开的API文档",
+      "success_probability": "low",
+      "compliance_status": "compliant",
+      "technical_complexity": "low"
+    },
+    "DT008": {
+      "name": "系统错误信息分析",
+      "type": "合规替代",
+      "description": "分析系统错误信息获取字段提示",
+      "success_probability": "medium",
+      "compliance_status": "compliant",
+      "technical_complexity": "medium"
+    },
+    "DT009": {
+      "name": "开发者社区协作",
+      "type": "社区资源",
+      "description": "通过开发者社区协作发现",
+      "success_probability": "medium",
+      "compliance_status": "compliant",
+      "technical_complexity": "low"
+    },
+    "DT010": {
+      "name": "开源项目参考",
+      "type": "社区资源",
+      "description": "参考相关开源项目实现",
+      "success_probability": "low",
+      "compliance_status": "compliant",
+      "technical_complexity": "medium"
+    },
+    "DT011": {
+      "name": "智能字段名生成",
+      "type": "混合方法",
+      "description": "使用智能算法生成字段名候选",
+      "success_probability": "medium",
+      "compliance_status": "compliant",
+      "technical_complexity": "high"
+    },
+    "DT012": {
+      "name": "多源信息融合",
+      "type": "混合方法",
+      "description": "融合多种信息来源",
+      "success_probability": "high",
+      "compliance_status": "compliant",
+      "technical_complexity": "high"
+    }
+  },
+  "field_candidates_summary": {
+    "total": 2318,
+    "by_confidence": {
+      "high": 58,
+      "medium": 610,
+      "low": 1650
+    },
+    "by_method": {
+      "numeric_pattern": 428,
+      "generic_pattern": 1050,
+      "chinese_abbreviation": 240,
+      "english_abbreviation": 600
+    },
+    "top_candidates": [
+      {
+        "id": "FC0005",
+        "name": "B0105_01",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0006",
+        "name": "b0105_01",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0009",
+        "name": "b0105_02",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0011",
+        "name": "B0105_02",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0016",
+        "name": "B0105_03",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0017",
+        "name": "b0105_03",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0021",
+        "name": "b0105_04",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0023",
+        "name": "B0105_04",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0028",
+        "name": "b0105_05",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      },
+      {
+        "id": "FC0030",
+        "name": "B0105_05",
+        "confidence": "high",
+        "method": "numeric_pattern"
+      }
+    ]
+  },
+  "discovery_results": [
+    {
+      "technique_id": "DT001",
+      "technique_name": "官方API文档获取",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.0217,
+      "error_message": null,
+      "evidence": "通过正规渠道获取API文档成功",
+      "recommendations": [
+        "建立长期供应商关系",
+        "定期更新API文档",
+        "建立内部知识库"
+      ]
+    },
+    {
+      "technique_id": "DT002",
+      "technique_name": "合作伙伴渠道",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.0246,
+      "error_message": null,
+      "evidence": "通过正规渠道获取API文档成功",
+      "recommendations": [
+        "建立长期供应商关系",
+        "定期更新API文档",
+        "建立内部知识库"
+      ]
+    },
+    {
+      "technique_id": "DT003",
+      "technique_name": "网络流量分析",
+      "success": true,
+      "discovered_fields_count": 1,
+      "execution_time": 0.0217,
+      "error_message": null,
+      "evidence": "技术分析发现部分字段名",
+      "recommendations": [
+        "持续监控网络流量",
+        "建立字段名模式库",
+        "自动化验证流程"
+      ]
+    },
+    {
+      "technique_id": "DT004",
+      "technique_name": "JavaScript源代码分析",
+      "success": true,
+      "discovered_fields_count": 1,
+      "execution_time": 0.025,
+      "error_message": null,
+      "evidence": "技术分析发现部分字段名",
+      "recommendations": [
+        "持续监控网络流量",
+        "建立字段名模式库",
+        "自动化验证流程"
+      ]
+    },
+    {
+      "technique_id": "DT005",
+      "technique_name": "移动应用逆向工程",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.0217,
+      "error_message": null,
+      "evidence": "逆向工程发现完整API结构",
+      "recommendations": [
+        "注意法律风险",
+        "建立安全分析环境",
+        "仅用于研究和学习"
+      ]
+    },
+    {
+      "technique_id": "DT006",
+      "technique_name": "桌面应用逆向工程",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.0239,
+      "error_message": null,
+      "evidence": "逆向工程发现完整API结构",
+      "recommendations": [
+        "注意法律风险",
+        "建立安全分析环境",
+        "仅用于研究和学习"
+      ]
+    },
+    {
+      "technique_id": "DT007",
+      "technique_name": "公开API文档挖掘",
+      "success": false,
+      "discovered_fields_count": 1,
+      "execution_time": 0.025,
+      "error_message": "公开API文档信息不完整",
+      "evidence": "仅发现基础字段信息",
+      "recommendations": [
+        "结合其他方法",
+        "建立假设验证流程",
+        "关注系统更新"
+      ]
+    },
+    {
+      "technique_id": "DT008",
+      "technique_name": "系统错误信息分析",
+      "success": false,
+      "discovered_fields_count": 1,
+      "execution_time": 0.0245,
+      "error_message": "公开API文档信息不完整",
+      "evidence": "仅发现基础字段信息",
+      "recommendations": [
+        "结合其他方法",
+        "建立假设验证流程",
+        "关注系统更新"
+      ]
+    },
+    {
+      "technique_id": "DT009",
+      "technique_name": "开发者社区协作",
+      "success": false,
+      "discovered_fields_count": 1,
+      "execution_time": 0.0213,
+      "error_message": "社区信息需要验证",
+      "evidence": "收集到部分社区分享信息",
+      "recommendations": [
+        "验证社区信息准确性",
+        "建立信息可信度评估",
+        "参与社区贡献"
+      ]
+    },
+    {
+      "technique_id": "DT010",
+      "technique_name": "开源项目参考",
+      "success": false,
+      "discovered_fields_count": 1,
+      "execution_time": 0.0202,
+      "error_message": "社区信息需要验证",
+      "evidence": "收集到部分社区分享信息",
+      "recommendations": [
+        "验证社区信息准确性",
+        "建立信息可信度评估",
+        "参与社区贡献"
+      ]
+    },
+    {
+      "technique_id": "DT011",
+      "technique_name": "智能字段名生成",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.025,
+      "error_message": null,
+      "evidence": "混合方法发现最全面信息",
+      "recommendations": [
+        "建立综合发现框架",
+        "持续优化算法",
+        "建立知识图谱"
+      ]
+    },
+    {
+      "technique_id": "DT012",
+      "technique_name": "多源信息融合",
+      "success": true,
+      "discovered_fields_count": 2,
+      "execution_time": 0.025,
+      "error_message": null,
+      "evidence": "混合方法发现最全面信息",
+      "recommendations": [
+        "建立综合发现框架",
+        "持续优化算法",
+        "建立知识图谱"
+      ]
+    }
+  ],
+  "recommendations": {
+    "compliant_approaches": [
+      {
+        "technique": "官方API文档获取",
+        "reason": "合规且成功率较高",
+        "priority": "high"
+      },
+      {
+        "technique": "合作伙伴渠道",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "公开API文档挖掘",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "系统错误信息分析",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "开发者社区协作",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "开源项目参考",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "智能字段名生成",
+        "reason": "合规且成功率较高",
+        "priority": "medium"
+      },
+      {
+        "technique": "多源信息融合",
+        "reason": "合规且成功率较高",
+        "priority": "high"
+      }
+    ],
+    "high_risk_warnings": [
+      {
+        "technique": "移动应用逆向工程",
+        "risk": "法律风险高",
+        "warning": "不推荐使用，可能违反法律法规"
+      },
+      {
+        "technique": "桌面应用逆向工程",
+        "risk": "法律风险高",
+        "warning": "不推荐使用，可能违反法律法规"
+      }
+    ],
+    "strategic_advice": [
+      "优先通过官方渠道获取API文档",
+      "建立合规的技术分析流程",
+      "参与开发者社区协作",
+      "建立字段名知识库和验证机制",
+      "持续关注系统更新和API变更"
+    ]
+  }
+}

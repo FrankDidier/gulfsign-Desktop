@@ -1,0 +1,201 @@
+{
+  "generated_at": "2026-05-25T05:16:03.116513",
+  "total_limitations": 5,
+  "total_solutions": 2,
+  "limitations": [
+    {
+      "limitation_id": "LIM-STATUS-001",
+      "limitation_name": "STATUS=5→0直接转换",
+      "description": "系统拒绝STATUS=5（已签约）直接转换为STATUS=0（未签约）",
+      "category": "系统规则",
+      "severity": "高",
+      "system_rule": true,
+      "business_rule": true,
+      "technical_rule": true,
+      "compliance_rule": true,
+      "bypass_possible": false,
+      "solution_count": 0,
+      "solution_ids": []
+    },
+    {
+      "limitation_id": "LIM-REALNAME-001",
+      "limitation_name": "已实名认证身份证号修改",
+      "description": "已通过实名认证的患者身份证号无法修改",
+      "category": "安全规则",
+      "severity": "高",
+      "system_rule": true,
+      "business_rule": true,
+      "technical_rule": true,
+      "compliance_rule": true,
+      "bypass_possible": false,
+      "solution_count": 0,
+      "solution_ids": []
+    },
+    {
+      "limitation_id": "LIM-FAMILY-001",
+      "limitation_name": "已签约家庭成员移除",
+      "description": "已签约的家庭成员无法从合同中移除",
+      "category": "业务规则",
+      "severity": "中",
+      "system_rule": true,
+      "business_rule": true,
+      "technical_rule": false,
+      "compliance_rule": true,
+      "bypass_possible": false,
+      "solution_count": 2,
+      "solution_ids": [
+        "SOL-FAMILY-001",
+        "SOL-FAMILY-002"
+      ]
+    },
+    {
+      "limitation_id": "LIM-SJFX-001",
+      "limitation_name": "sjfx API字段名未知",
+      "description": "sjfx API的字段名未公开，需要发现正确的字段名",
+      "category": "技术限制",
+      "severity": "中",
+      "system_rule": false,
+      "business_rule": false,
+      "technical_rule": true,
+      "compliance_rule": false,
+      "bypass_possible": true,
+      "solution_count": 0,
+      "solution_ids": []
+    },
+    {
+      "limitation_id": "LIM-AGE-001",
+      "limitation_name": "年龄验证绕行限制",
+      "description": "年龄验证绕行受系统规则限制，已实名认证患者无法修改",
+      "category": "系统规则",
+      "severity": "中",
+      "system_rule": true,
+      "business_rule": true,
+      "technical_rule": false,
+      "compliance_rule": true,
+      "bypass_possible": true,
+      "solution_count": 0,
+      "solution_ids": []
+    }
+  ],
+  "solutions": [
+    {
+      "solution_id": "SOL-FAMILY-001",
+      "limitation_id": "LIM-FAMILY-001",
+      "limitation_name": "已签约家庭成员移除",
+      "solution_name": "合同解约重签方案",
+      "solution_description": "解约整个合同，然后重新签约需要的家庭成员",
+      "technical_feasibility": 0.95,
+      "compliance_level": "完全合规",
+      "implementation_complexity": "低复杂度",
+      "business_impact": "中等影响",
+      "priority": "中优先级",
+      "implementation_steps": [
+        "1. 发起合同解约申请",
+        "2. 等待解约完成",
+        "3. 创建新合同",
+        "4. 添加需要签约的家庭成员",
+        "5. 完成签约流程"
+      ],
+      "prerequisites": [
+        "合同解约权限",
+        "家庭成员信息"
+      ],
+      "risks": [
+        "解约影响其他成员",
+        "需要重新签约"
+      ],
+      "mitigation_strategies": [
+        "选择非高峰时段",
+        "提前通知家庭成员"
+      ],
+      "estimated_effort_days": 3,
+      "success_rate": 0.9
+    },
+    {
+      "solution_id": "SOL-FAMILY-002",
+      "limitation_id": "LIM-FAMILY-001",
+      "limitation_name": "已签约家庭成员移除",
+      "solution_name": "家庭成员替代方案",
+      "solution_description": "为需要移除的成员创建替代解决方案",
+      "technical_feasibility": 0.8,
+      "compliance_level": "完全合规",
+      "implementation_complexity": "中等复杂度",
+      "business_impact": "低影响",
+      "priority": "低优先级",
+      "implementation_steps": [
+        "1. 分析成员移除原因",
+        "2. 设计替代解决方案",
+        "3. 实施替代方案",
+        "4. 监控方案效果",
+        "5. 优化调整方案"
+      ],
+      "prerequisites": [
+        "业务分析能力",
+        "替代方案设计"
+      ],
+      "risks": [
+        "替代方案效果不佳",
+        "需要持续优化"
+      ],
+      "mitigation_strategies": [
+        "设计多个备选方案",
+        "建立效果评估机制"
+      ],
+      "estimated_effort_days": 5,
+      "success_rate": 0.7
+    }
+  ],
+  "priority_matrix": {
+    "high_priority": [],
+    "medium_priority": [
+      {
+        "solution_id": "SOL-FAMILY-001",
+        "solution_name": "合同解约重签方案",
+        "limitation_name": "已签约家庭成员移除",
+        "technical_feasibility": 0.95,
+        "compliance_level": "完全合规",
+        "estimated_effort_days": 3,
+        "business_impact": "中等影响"
+      }
+    ],
+    "low_priority": [
+      {
+        "solution_id": "SOL-FAMILY-002",
+        "solution_name": "家庭成员替代方案",
+        "limitation_name": "已签约家庭成员移除",
+        "technical_feasibility": 0.8,
+        "compliance_level": "完全合规",
+        "estimated_effort_days": 5,
+        "business_impact": "低影响"
+      }
+    ]
+  },
+  "implementation_roadmap": {
+    "immediate_actions": [
+      {
+        "solution_id": "SOL-FAMILY-001",
+        "solution_name": "合同解约重签方案",
+        "estimated_effort_days": 3,
+        "prerequisites": [
+          "合同解约权限",
+          "家庭成员信息"
+        ],
+        "dependencies": []
+      }
+    ],
+    "short_term": [
+      {
+        "solution_id": "SOL-FAMILY-002",
+        "solution_name": "家庭成员替代方案",
+        "estimated_effort_days": 5,
+        "prerequisites": [
+          "业务分析能力",
+          "替代方案设计"
+        ],
+        "dependencies": []
+      }
+    ],
+    "medium_term": [],
+    "long_term": []
+  }
+}

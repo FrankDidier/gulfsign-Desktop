@@ -1,0 +1,57 @@
+{
+  "verification_time": "2026-05-24T05:11:35.065212",
+  "test_directory": "/Users/vv/Desktop/工作组《260329_系统开发_湾流》/gulfsign-desktop/encryption_test",
+  "total_tests": 10,
+  "passed_tests": 10,
+  "pass_rate": 100.0,
+  "license_crypto_tests": [
+    {
+      "test": "AES密钥生成",
+      "result": true
+    },
+    {
+      "test": "AES IV生成",
+      "result": true
+    },
+    {
+      "test": "RSA加密",
+      "result": true
+    },
+    {
+      "test": "AES加密",
+      "result": true
+    },
+    {
+      "test": "AES解密",
+      "result": true
+    }
+  ],
+  "config_encryptor_tests": [
+    {
+      "test": "配置加密",
+      "result": true
+    },
+    {
+      "test": "配置解密",
+      "result": true
+    },
+    {
+      "test": "数据完整性",
+      "result": true
+    }
+  ],
+  "performance_tests": [
+    {
+      "test": "批量加密性能",
+      "result": true
+    },
+    {
+      "test": "处理时间",
+      "result": true
+    }
+  ],
+  "files_created": [
+    "original_test_data.json",
+    "encrypted_test_data.json"
+  ]
+}

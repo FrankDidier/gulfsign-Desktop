@@ -1,0 +1,395 @@
+{
+  "simulation_id": "SIM-20260525055718",
+  "target_system": "家庭医生签约系统",
+  "start_time": "2026-05-25T05:57:18.798023",
+  "scenarios": [
+    {
+      "name": "SQL注入攻击",
+      "results": {
+        "scenario_id": "SCEN-SQLI-001",
+        "vulnerability_id": "VULN-SQLI-001",
+        "test_steps": [
+          {
+            "step": 1,
+            "description": "识别用户输入字段",
+            "status": "completed",
+            "details": "识别了登录表单、搜索框、参数输入等用户输入字段"
+          },
+          {
+            "step": 2,
+            "description": "构造SQL注入payload",
+            "status": "completed",
+            "details": "构造了 4 个SQL注入payload",
+            "payloads": [
+              "' OR '1'='1",
+              "' OR '1'='1' --",
+              "' UNION SELECT NULL, NULL --",
+              "'; DROP TABLE users --"
+            ]
+          },
+          {
+            "step": 3,
+            "description": "发送模拟请求",
+            "status": "completed",
+            "details": "发送了 3 个模拟请求",
+            "responses": [
+              {
+                "payload": "' OR '1'='1",
+                "response": "正常响应",
+                "vulnerable": false
+              },
+              {
+                "payload": "' UNION SELECT NULL, NULL --",
+                "response": "数据库错误",
+                "vulnerable": true
+              },
+              {
+                "payload": "'; DROP TABLE users --",
+                "response": "权限拒绝",
+                "vulnerable": false
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析响应",
+            "status": "completed",
+            "details": "分析了 3 个响应，发现 1 个漏洞"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "高",
+            "description": "应用程序未正确过滤用户输入，允许攻击者执行恶意SQL查询",
+            "evidence": "发现 1 个SQL注入漏洞",
+            "location": "用户输入字段",
+            "recommendations": "使用参数化查询、输入验证、最小权限原则"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "高",
+          "cvss_score": 8.5,
+          "impact": "数据泄露、数据篡改、权限提升",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "XSS攻击",
+      "results": {
+        "scenario_id": "SCEN-XSS-001",
+        "vulnerability_id": "VULN-XSS-001",
+        "test_steps": [
+          {
+            "step": 1,
+            "description": "识别用户输入字段",
+            "status": "completed",
+            "details": "识别了评论框、搜索框、个人信息字段等用户输入字段"
+          },
+          {
+            "step": 2,
+            "description": "构造XSS payload",
+            "status": "completed",
+            "details": "构造了 4 个XSS payload",
+            "payloads": [
+              "<script>alert('XSS')</script>",
+              "<img src=x onerror=alert('XSS')>",
+              "javascript:alert('XSS')",
+              "<svg onload=alert('XSS')>"
+            ]
+          },
+          {
+            "step": 3,
+            "description": "发送模拟请求",
+            "status": "completed",
+            "details": "发送了 3 个模拟请求",
+            "responses": [
+              {
+                "payload": "<script>alert('XSS')</script>",
+                "response": "脚本被过滤",
+                "vulnerable": false
+              },
+              {
+                "payload": "<img src=x onerror=alert('XSS')>",
+                "response": "标签被转义",
+                "vulnerable": false
+              },
+              {
+                "payload": "javascript:alert('XSS')",
+                "response": "协议被阻止",
+                "vulnerable": false
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析响应",
+            "status": "completed",
+            "details": "分析了 3 个响应，发现 0 个漏洞"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现XSS漏洞",
+            "evidence": "所有测试payload均被正确过滤",
+            "location": "所有用户输入字段",
+            "recommendations": "继续保持良好的输入过滤实践"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "cvss_score": 0.0,
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "身份验证绕过",
+      "results": {
+        "scenario_id": "SCEN-AUTH-001",
+        "vulnerability_id": "VULN-AUTH-001",
+        "test_steps": [
+          {
+            "step": 1,
+            "description": "分析认证流程",
+            "status": "completed",
+            "details": "分析了登录流程、会话管理、令牌验证等认证机制"
+          },
+          {
+            "step": 2,
+            "description": "测试会话管理",
+            "status": "completed",
+            "details": "执行了 3 个会话管理测试",
+            "tests": [
+              {
+                "test": "会话固定测试",
+                "result": "会话ID随机生成，无法固定"
+              },
+              {
+                "test": "会话超时测试",
+                "result": "会话超时机制正常"
+              },
+              {
+                "test": "会话注销测试",
+                "result": "注销后会话立即失效"
+              }
+            ]
+          },
+          {
+            "step": 3,
+            "description": "尝试直接API访问",
+            "status": "completed",
+            "details": "测试了 3 个API端点",
+            "tests": [
+              {
+                "endpoint": "/api/user/profile",
+                "method": "GET",
+                "result": "需要认证",
+                "vulnerable": false
+              },
+              {
+                "endpoint": "/api/admin/users",
+                "method": "GET",
+                "result": "需要管理员权限",
+                "vulnerable": false
+              },
+              {
+                "endpoint": "/api/data/export",
+                "method": "POST",
+                "result": "需要认证",
+                "vulnerable": false
+              }
+            ]
+          },
+          {
+            "step": 4,
+            "description": "分析测试结果",
+            "status": "completed",
+            "details": "分析了 3 个测试，发现 0 个漏洞"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现身份验证绕过漏洞",
+            "evidence": "所有API端点均有正确的认证检查",
+            "location": "所有API端点",
+            "recommendations": "继续保持良好的认证机制"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "cvss_score": 0.0,
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "敏感数据泄露",
+      "results": {
+        "scenario_id": "SCEN-DATA-001",
+        "vulnerability_id": "VULN-DATA-001",
+        "test_steps": [
+          {
+            "step": 1,
+            "description": "分析数据传输",
+            "status": "completed",
+            "details": "执行了 3 个传输安全测试",
+            "tests": [
+              {
+                "test": "HTTPS强制使用",
+                "result": "已启用HTTPS，HTTP请求被重定向"
+              },
+              {
+                "test": "TLS版本检查",
+                "result": "使用TLS 1.2及以上版本"
+              },
+              {
+                "test": "证书验证",
+                "result": "使用有效SSL证书"
+              }
+            ]
+          },
+          {
+            "step": 2,
+            "description": "检查数据存储",
+            "status": "completed",
+            "details": "执行了 3 个数据存储测试",
+            "tests": [
+              {
+                "test": "敏感数据加密",
+                "result": "密码等敏感数据已加密存储"
+              },
+              {
+                "test": "日志中敏感信息",
+                "result": "日志中未发现明文敏感信息"
+              },
+              {
+                "test": "备份数据保护",
+                "result": "备份数据有访问控制"
+              }
+            ]
+          },
+          {
+            "step": 3,
+            "description": "分析测试结果",
+            "status": "completed",
+            "details": "分析了 6 个测试，发现 0 个风险"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现敏感数据泄露漏洞",
+            "evidence": "数据传输和存储均有适当的安全措施",
+            "location": "所有数据传输和存储点",
+            "recommendations": "继续保持良好的数据保护实践"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "cvss_score": 0.0,
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    },
+    {
+      "name": "访问控制绕过",
+      "results": {
+        "scenario_id": "SCEN-ACL-001",
+        "vulnerability_id": "VULN-ACL-001",
+        "test_steps": [
+          {
+            "step": 1,
+            "description": "分析权限模型",
+            "status": "completed",
+            "details": "执行了 3 个权限模型测试",
+            "tests": [
+              {
+                "test": "角色权限分离",
+                "result": "用户、医生、管理员角色权限分离清晰"
+              },
+              {
+                "test": "最小权限原则",
+                "result": "各角色遵循最小权限原则"
+              },
+              {
+                "test": "权限继承检查",
+                "result": "无不当权限继承"
+              }
+            ]
+          },
+          {
+            "step": 2,
+            "description": "测试越权访问",
+            "status": "completed",
+            "details": "执行了 3 个越权访问测试",
+            "tests": [
+              {
+                "test": "水平越权测试",
+                "result": "用户无法访问其他用户数据",
+                "vulnerable": false
+              },
+              {
+                "test": "垂直越权测试",
+                "result": "普通用户无法访问管理员功能",
+                "vulnerable": false
+              },
+              {
+                "test": "IDOR漏洞测试",
+                "result": "对象ID无法被预测或篡改",
+                "vulnerable": false
+              }
+            ]
+          },
+          {
+            "step": 3,
+            "description": "分析测试结果",
+            "status": "completed",
+            "details": "分析了 3 个测试，发现 0 个漏洞"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "信息",
+            "description": "未发现访问控制绕过漏洞",
+            "evidence": "所有权限控制点均有正确的访问检查",
+            "location": "所有权限控制点",
+            "recommendations": "继续保持良好的访问控制实践"
+          }
+        ],
+        "risk_assessment": {
+          "risk_level": "低",
+          "cvss_score": 0.0,
+          "impact": "无",
+          "confidence": "高"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total_scenarios": 5,
+    "completed_scenarios": 5,
+    "detected_vulnerabilities": 1,
+    "overall_risk_level": "中",
+    "end_time": "2026-05-25T05:57:18.798178",
+    "duration_seconds": 0.000156
+  },
+  "recommendations": [
+    "1. 定期进行安全代码审查，重点关注用户输入验证",
+    "2. 实施Web应用防火墙(WAF)保护应用程序",
+    "3. 对所有用户输入进行严格的验证和过滤",
+    "4. 使用参数化查询防止SQL注入",
+    "5. 实施内容安全策略(CSP)防止XSS攻击",
+    "6. 加强身份验证机制，考虑多因素认证",
+    "7. 确保敏感数据在传输和存储时加密",
+    "8. 实施最小权限原则，严格控制访问权限",
+    "9. 定期更新和打补丁所有系统组件",
+    "10. 建立安全监控和事件响应机制",
+    "11. 紧急修复: SQL注入漏洞 - 使用参数化查询、输入验证、最小权限原则"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "verification_time": "2026-05-24T05:07:06.379612",
+  "test_directory": "/Users/vv/Desktop/工作组《260329_系统开发_湾流》/gulfsign-desktop/excel_log_test",
+  "files_created": 3,
+  "excel_files": [
+    {
+      "name": "doctor_zhang_001.xlsx",
+      "size": 5413,
+      "path": "logs/成功/20260524/doctor_zhang_001.xlsx"
+    },
+    {
+      "name": "nurse_li_002.xlsx",
+      "size": 5430,
+      "path": "logs/成功/20260524/nurse_li_002.xlsx"
+    },
+    {
+      "name": "patient_wang_003.xlsx",
+      "size": 5428,
+      "path": "logs/成功/20260524/patient_wang_003.xlsx"
+    }
+  ],
+  "performance_metrics": {
+    "batch_size": 10,
+    "total_time": 0.02476787567138672,
+    "avg_time_per_log": 0.002476787567138672,
+    "throughput": 403.7487967348196
+  },
+  "verification_results": {
+    "file_creation": true,
+    "content_readable": true,
+    "structure_complete": true,
+    "performance_acceptable": true
+  }
+}

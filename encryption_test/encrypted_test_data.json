@@ -1,0 +1,47 @@
+{
+  "encrypted_config": {
+    "username": "config_test_user",
+    "password": "ENC:nHoRoiBS0sxBefJhk6uL5BvACgoMgJ3US1muy8rFZTrQO75eckfK9g==",
+    "license_account": "license_test_account",
+    "license_password": "ENC:k3wcoSdG6OdQb/VKvLqZ5B/YFxw37pvSphDjLXgltpPacn2hbQJYZ/k=",
+    "url": "https://ggws.hnhfpc.gov.cn",
+    "doctor": "加密测试医生",
+    "team": "加密测试团队"
+  },
+  "encrypted_request": {
+    "encrypted_key": "TML+Sr9yc0+/to11E0KpdIRVDYFVmyrKcLzYlgsZSD7n3L67RU8fBuULhBk3SxnCMyV4QQIbmpo08sxgWbjCPVtU+y1Sqn8mx98Cu83QyMSmH2yVr80KciXVs1MERYs6t1icywl5dPay48NkvlwdylpQM1FFFIzTDyT8alVjH1wQXr6Md5msj8CeEcCp7TX8iStK595wrgmF1hKvNAblx4T5TrYPQS4yCDfhKrGkiIuSqWhyeCHYH/Vy7GS2765gSERaW2ZTjm9fPtLcUu/VT/WLOzBUcQYOeNHkNAXeYzc9FhTgAmzQCwcDvqgwLEpeujmoAZbCuJl0Gsy6K8SdjQ==",
+    "encrypted_iv": "bSoIRBQMmX2D2IBONqcbyg==",
+    "encrypted_data": "tJjY64UiaqpgASO4VTPpBtq3olcuV5SrjlTsMTdRIGjbAsKzlkn6CIeyuW0DHx0fCMRSrMP2MB0qo7f+y4im7bdqA66FDylHc35JbrGcbwAarU58DCe+Trzn0uPOJA6RnpADxsPOL92sVGWLKSeQTDk03tJiCj8JTRY5xG9UgtqWiProjK/lWoVUlqr3xwCaRxW43d7ImnBY5wl9zX6WK/gxTxpEK0mpDkT+0w3jp6b+lpup5IZrp+/Ufs2qopCVt0BzsIvUSWmXbcAbeHe1goSVQFA2HoFBQXYYxM1LYRltjbBY6Dzk35CjTS69ZMyBAkaCPJ3xevocRRxVfcA47ujsC5ddMQBBFpUMWhcUZA4h1W2xsIPO8s5q1nNw5wuRBk+SNY9Frj1GFTMNPdEbEA==",
+    "timestamp": 1779570695055
+  },
+  "performance_results": [
+    {
+      "case": "短文本",
+      "original_size": 7,
+      "encrypted_size": 32,
+      "processing_time": 7.510185241699219e-05,
+      "is_valid": true
+    },
+    {
+      "case": "中文本",
+      "original_size": 24,
+      "encrypted_size": 80,
+      "processing_time": 2.193450927734375e-05,
+      "is_valid": true
+    },
+    {
+      "case": "长文本",
+      "original_size": 315,
+      "encrypted_size": 816,
+      "processing_time": 2.4080276489257812e-05,
+      "is_valid": true
+    },
+    {
+      "case": "JSON数据",
+      "original_size": 172,
+      "encrypted_size": 176,
+      "processing_time": 1.52587890625e-05,
+      "is_valid": true
+    }
+  ]
+}

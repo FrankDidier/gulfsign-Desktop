@@ -1,0 +1,749 @@
+{
+  "timestamp": "2026-05-25 04:29:04",
+  "analysis_summary": {
+    "total_options_analyzed": 13,
+    "methods_covered": [
+      "官方渠道",
+      "技术手段",
+      "逆向工程",
+      "合规替代方案",
+      "社区资源"
+    ],
+    "risk_levels_present": [
+      "低风险",
+      "中风险",
+      "高风险",
+      "极高风险"
+    ],
+    "compliance_statuses": [
+      "合规",
+      "可能不合规",
+      "不合规",
+      "未知"
+    ]
+  },
+  "all_options": [
+    {
+      "method": "官方渠道",
+      "name": "联系系统供应商",
+      "description": "直接联系健康卡系统供应商获取官方API文档",
+      "steps": [
+        "1. 确定系统供应商联系方式",
+        "2. 准备正式的技术支持请求",
+        "3. 说明业务需求和合规要求",
+        "4. 请求API接口文档和字段说明",
+        "5. 签署必要的保密协议"
+      ],
+      "prerequisites": [
+        "供应商联系方式",
+        "正式的业务需求说明",
+        "合规性证明文件"
+      ],
+      "success_probability": "70.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "1-2周",
+      "resources_needed": [
+        "联系人信息",
+        "公司授权",
+        "技术团队"
+      ],
+      "notes": "最合规的方法，但可能需要时间和费用"
+    },
+    {
+      "method": "官方渠道",
+      "name": "申请开发者账号",
+      "description": "申请官方开发者账号获取API访问权限",
+      "steps": [
+        "1. 访问开发者门户网站",
+        "2. 注册开发者账号",
+        "3. 提交企业认证材料",
+        "4. 申请API访问权限",
+        "5. 获取API密钥和文档"
+      ],
+      "prerequisites": [
+        "企业营业执照",
+        "技术负责人信息",
+        "业务场景说明"
+      ],
+      "success_probability": "60.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "3-5个工作日",
+      "resources_needed": [
+        "企业资质",
+        "技术联系人"
+      ],
+      "notes": "如果系统提供公开的开发者门户，这是最佳选择"
+    },
+    {
+      "method": "官方渠道",
+      "name": "参加技术培训",
+      "description": "参加供应商组织的技术培训获取文档",
+      "steps": [
+        "1. 查询供应商培训计划",
+        "2. 报名参加技术培训",
+        "3. 参加培训获取资料",
+        "4. 与培训讲师建立联系",
+        "5. 获取后续技术支持"
+      ],
+      "prerequisites": [
+        "培训费用预算",
+        "技术人员时间",
+        "学习意愿"
+      ],
+      "success_probability": "80.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "1-2天培训 + 后续跟进",
+      "resources_needed": [
+        "培训费用",
+        "技术人员"
+      ],
+      "notes": "不仅能获取文档，还能获得实际操作经验"
+    },
+    {
+      "method": "技术手段",
+      "name": "Swagger/OpenAPI 发现",
+      "description": "尝试发现系统是否提供Swagger或OpenAPI文档",
+      "steps": [
+        "1. 扫描常见Swagger路径 (/swagger, /api-docs, /v2/api-docs)",
+        "2. 检查HTML页面中的Swagger UI引用",
+        "3. 尝试访问可能的OpenAPI端点",
+        "4. 分析JavaScript文件中的API配置",
+        "5. 使用自动化工具进行发现"
+      ],
+      "prerequisites": [
+        "网络访问权限",
+        "基本的Web扫描工具",
+        "Swagger/OpenAPI知识"
+      ],
+      "success_probability": "40.0%",
+      "risk_level": "中风险",
+      "compliance_status": "可能不合规",
+      "estimated_time": "几小时",
+      "resources_needed": [
+        "扫描工具",
+        "代理工具"
+      ],
+      "notes": "如果系统使用现代API框架，可能有效"
+    },
+    {
+      "method": "技术手段",
+      "name": "网络流量分析",
+      "description": "通过代理捕获和分析API调用",
+      "steps": [
+        "1. 设置HTTP/HTTPS代理 (如mitmproxy)",
+        "2. 配置系统使用代理",
+        "3. 执行正常操作捕获流量",
+        "4. 分析请求/响应模式",
+        "5. 提取字段名和数据结构"
+      ],
+      "prerequisites": [
+        "代理设置权限",
+        "系统访问权限",
+        "流量分析工具"
+      ],
+      "success_probability": "90.0%",
+      "risk_level": "中风险",
+      "compliance_status": "可能不合规",
+      "estimated_time": "几小时到一天",
+      "resources_needed": [
+        "代理工具",
+        "分析工具",
+        "测试账号"
+      ],
+      "notes": "非常有效，但需要注意隐私和合规问题"
+    },
+    {
+      "method": "技术手段",
+      "name": "JavaScript 源代码分析",
+      "description": "分析前端JavaScript代码中的API调用",
+      "steps": [
+        "1. 访问系统Web界面",
+        "2. 查看页面源代码",
+        "3. 分析引用的JavaScript文件",
+        "4. 搜索API端点URL和字段名",
+        "5. 使用开发者工具调试"
+      ],
+      "prerequisites": [
+        "Web访问权限",
+        "JavaScript知识",
+        "浏览器开发者工具技能"
+      ],
+      "success_probability": "70.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几小时",
+      "resources_needed": [
+        "浏览器",
+        "代码编辑器"
+      ],
+      "notes": "合规的方法，可以获取大量信息"
+    },
+    {
+      "method": "逆向工程",
+      "name": "移动应用逆向",
+      "description": "逆向分析移动应用中的API调用",
+      "steps": [
+        "1. 获取移动应用安装包 (APK/IPA)",
+        "2. 解包分析资源文件",
+        "3. 反编译代码分析逻辑",
+        "4. 提取API配置信息",
+        "5. 动态分析运行时行为"
+      ],
+      "prerequisites": [
+        "逆向工程工具",
+        "移动应用安全知识",
+        "法律风险评估"
+      ],
+      "success_probability": "80.0%",
+      "risk_level": "高风险",
+      "compliance_status": "不合规",
+      "estimated_time": "几天",
+      "resources_needed": [
+        "逆向工具",
+        "测试设备",
+        "法律咨询"
+      ],
+      "notes": "高风险，可能违反服务条款和法律法规"
+    },
+    {
+      "method": "逆向工程",
+      "name": "桌面客户端分析",
+      "description": "分析桌面客户端程序的API通信",
+      "steps": [
+        "1. 获取客户端程序文件",
+        "2. 分析网络通信模块",
+        "3. 使用调试器跟踪调用",
+        "4. 提取API请求模板",
+        "5. 分析加密/解密逻辑"
+      ],
+      "prerequisites": [
+        "二进制分析技能",
+        "调试工具",
+        "网络分析工具"
+      ],
+      "success_probability": "60.0%",
+      "risk_level": "高风险",
+      "compliance_status": "不合规",
+      "estimated_time": "几天到一周",
+      "resources_needed": [
+        "分析工具",
+        "调试器",
+        "反汇编器"
+      ],
+      "notes": "技术难度高，法律风险大"
+    },
+    {
+      "method": "合规替代方案",
+      "name": "业务需求分析",
+      "description": "通过业务需求推导API字段需求",
+      "steps": [
+        "1. 分析签约业务流程",
+        "2. 确定必要的数据字段",
+        "3. 参考类似系统的API设计",
+        "4. 创建假设的字段名列表",
+        "5. 通过测试验证假设"
+      ],
+      "prerequisites": [
+        "业务知识",
+        "系统分析能力",
+        "测试环境"
+      ],
+      "success_probability": "50.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几天",
+      "resources_needed": [
+        "业务专家",
+        "技术团队"
+      ],
+      "notes": "完全合规，但准确率取决于分析质量"
+    },
+    {
+      "method": "合规替代方案",
+      "name": "现有系统集成分析",
+      "description": "分析现有集成系统的API使用",
+      "steps": [
+        "1. 检查已有集成的系统",
+        "2. 分析集成代码和配置",
+        "3. 提取API调用示例",
+        "4. 验证字段名有效性",
+        "5. 创建API文档"
+      ],
+      "prerequisites": [
+        "现有集成系统访问权限",
+        "代码分析能力",
+        "测试验证能力"
+      ],
+      "success_probability": "90.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几小时到一天",
+      "resources_needed": [
+        "集成系统",
+        "代码访问权限"
+      ],
+      "notes": "如果已有成功集成的系统，这是最佳合规方案"
+    },
+    {
+      "method": "合规替代方案",
+      "name": "标准医疗API参考",
+      "description": "参考医疗行业标准API设计",
+      "steps": [
+        "1. 研究HL7 FHIR标准",
+        "2. 分析国内医疗数据标准",
+        "3. 参考类似医疗系统的API",
+        "4. 创建符合标准的字段名",
+        "5. 通过测试调整优化"
+      ],
+      "prerequisites": [
+        "医疗行业知识",
+        "API设计经验",
+        "标准研究能力"
+      ],
+      "success_probability": "60.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几天",
+      "resources_needed": [
+        "行业标准文档",
+        "技术团队"
+      ],
+      "notes": "符合行业最佳实践，但需要适应具体系统"
+    },
+    {
+      "method": "社区资源",
+      "name": "技术社区交流",
+      "description": "在相关技术社区寻求帮助",
+      "steps": [
+        "1. 加入医疗信息化技术社区",
+        "2. 准备具体的技术问题",
+        "3. 遵守社区规则和礼仪",
+        "4. 与有经验的技术人员交流",
+        "5. 整理获取的信息"
+      ],
+      "prerequisites": [
+        "社区参与意愿",
+        "技术交流能力",
+        "信息筛选能力"
+      ],
+      "success_probability": "30.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几天到几周",
+      "resources_needed": [
+        "社区账号",
+        "交流时间"
+      ],
+      "notes": "可能获得意外帮助，但不确定性高"
+    },
+    {
+      "method": "社区资源",
+      "name": "开源项目参考",
+      "description": "参考类似的开源医疗项目",
+      "steps": [
+        "1. 搜索医疗健康相关的开源项目",
+        "2. 分析其API设计和实现",
+        "3. 提取可借鉴的字段名模式",
+        "4. 测试在目标系统中的适用性",
+        "5. 调整优化字段名"
+      ],
+      "prerequisites": [
+        "开源项目搜索能力",
+        "代码分析能力",
+        "测试验证能力"
+      ],
+      "success_probability": "40.0%",
+      "risk_level": "低风险",
+      "compliance_status": "合规",
+      "estimated_time": "几天",
+      "resources_needed": [
+        "开源项目",
+        "分析工具"
+      ],
+      "notes": "完全合规，但需要找到高度相关的项目"
+    }
+  ],
+  "recommended_plan": {
+    "timestamp": "2026-05-25 04:29:04",
+    "summary": {
+      "total_compliant_options": 7,
+      "total_high_risk_options": 6,
+      "average_success_probability": "68.6%",
+      "recommended_approach": "分阶段实施，优先合规方案"
+    },
+    "phases": [
+      {
+        "phase": "第一阶段：合规快速验证",
+        "duration": "1-2天",
+        "objective": "快速验证可行性，获取基础信息",
+        "options": [
+          {
+            "name": "JavaScript 源代码分析",
+            "success_probability": "70.0%",
+            "estimated_time": "几小时",
+            "resources_needed": [
+              "浏览器",
+              "代码编辑器"
+            ]
+          }
+        ],
+        "warning": null
+      },
+      {
+        "phase": "第二阶段：深度合规获取",
+        "duration": "3-5天",
+        "objective": "获取完整API文档，建立稳定集成",
+        "options": [
+          {
+            "name": "联系系统供应商",
+            "success_probability": "70.0%",
+            "estimated_time": "1-2周",
+            "resources_needed": [
+              "联系人信息",
+              "公司授权",
+              "技术团队"
+            ]
+          },
+          {
+            "name": "标准医疗API参考",
+            "success_probability": "60.0%",
+            "estimated_time": "几天",
+            "resources_needed": [
+              "行业标准文档",
+              "技术团队"
+            ]
+          },
+          {
+            "name": "业务需求分析",
+            "success_probability": "50.0%",
+            "estimated_time": "几天",
+            "resources_needed": [
+              "业务专家",
+              "技术团队"
+            ]
+          }
+        ],
+        "warning": null
+      },
+      {
+        "phase": "第三阶段：应急方案准备",
+        "duration": "备用",
+        "objective": "准备应急技术方案，仅在紧急情况下考虑",
+        "options": [
+          {
+            "name": "网络流量分析",
+            "success_probability": "90.0%",
+            "estimated_time": "几小时到一天",
+            "resources_needed": [
+              "代理工具",
+              "分析工具",
+              "测试账号"
+            ]
+          },
+          {
+            "name": "现有系统集成分析",
+            "success_probability": "90.0%",
+            "estimated_time": "几小时到一天",
+            "resources_needed": [
+              "集成系统",
+              "代码访问权限"
+            ]
+          }
+        ],
+        "warning": "高风险选项，需法律评估和授权"
+      }
+    ],
+    "detailed_options": {
+      "compliant": [
+        {
+          "method": "合规替代方案",
+          "name": "现有系统集成分析",
+          "description": "分析现有集成系统的API使用",
+          "steps": [
+            "1. 检查已有集成的系统",
+            "2. 分析集成代码和配置",
+            "3. 提取API调用示例",
+            "4. 验证字段名有效性",
+            "5. 创建API文档"
+          ],
+          "prerequisites": [
+            "现有集成系统访问权限",
+            "代码分析能力",
+            "测试验证能力"
+          ],
+          "success_probability": "90.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "几小时到一天",
+          "resources_needed": [
+            "集成系统",
+            "代码访问权限"
+          ],
+          "notes": "如果已有成功集成的系统，这是最佳合规方案"
+        },
+        {
+          "method": "官方渠道",
+          "name": "参加技术培训",
+          "description": "参加供应商组织的技术培训获取文档",
+          "steps": [
+            "1. 查询供应商培训计划",
+            "2. 报名参加技术培训",
+            "3. 参加培训获取资料",
+            "4. 与培训讲师建立联系",
+            "5. 获取后续技术支持"
+          ],
+          "prerequisites": [
+            "培训费用预算",
+            "技术人员时间",
+            "学习意愿"
+          ],
+          "success_probability": "80.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "1-2天培训 + 后续跟进",
+          "resources_needed": [
+            "培训费用",
+            "技术人员"
+          ],
+          "notes": "不仅能获取文档，还能获得实际操作经验"
+        },
+        {
+          "method": "官方渠道",
+          "name": "联系系统供应商",
+          "description": "直接联系健康卡系统供应商获取官方API文档",
+          "steps": [
+            "1. 确定系统供应商联系方式",
+            "2. 准备正式的技术支持请求",
+            "3. 说明业务需求和合规要求",
+            "4. 请求API接口文档和字段说明",
+            "5. 签署必要的保密协议"
+          ],
+          "prerequisites": [
+            "供应商联系方式",
+            "正式的业务需求说明",
+            "合规性证明文件"
+          ],
+          "success_probability": "70.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "1-2周",
+          "resources_needed": [
+            "联系人信息",
+            "公司授权",
+            "技术团队"
+          ],
+          "notes": "最合规的方法，但可能需要时间和费用"
+        },
+        {
+          "method": "技术手段",
+          "name": "JavaScript 源代码分析",
+          "description": "分析前端JavaScript代码中的API调用",
+          "steps": [
+            "1. 访问系统Web界面",
+            "2. 查看页面源代码",
+            "3. 分析引用的JavaScript文件",
+            "4. 搜索API端点URL和字段名",
+            "5. 使用开发者工具调试"
+          ],
+          "prerequisites": [
+            "Web访问权限",
+            "JavaScript知识",
+            "浏览器开发者工具技能"
+          ],
+          "success_probability": "70.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "几小时",
+          "resources_needed": [
+            "浏览器",
+            "代码编辑器"
+          ],
+          "notes": "合规的方法，可以获取大量信息"
+        },
+        {
+          "method": "官方渠道",
+          "name": "申请开发者账号",
+          "description": "申请官方开发者账号获取API访问权限",
+          "steps": [
+            "1. 访问开发者门户网站",
+            "2. 注册开发者账号",
+            "3. 提交企业认证材料",
+            "4. 申请API访问权限",
+            "5. 获取API密钥和文档"
+          ],
+          "prerequisites": [
+            "企业营业执照",
+            "技术负责人信息",
+            "业务场景说明"
+          ],
+          "success_probability": "60.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "3-5个工作日",
+          "resources_needed": [
+            "企业资质",
+            "技术联系人"
+          ],
+          "notes": "如果系统提供公开的开发者门户，这是最佳选择"
+        },
+        {
+          "method": "合规替代方案",
+          "name": "标准医疗API参考",
+          "description": "参考医疗行业标准API设计",
+          "steps": [
+            "1. 研究HL7 FHIR标准",
+            "2. 分析国内医疗数据标准",
+            "3. 参考类似医疗系统的API",
+            "4. 创建符合标准的字段名",
+            "5. 通过测试调整优化"
+          ],
+          "prerequisites": [
+            "医疗行业知识",
+            "API设计经验",
+            "标准研究能力"
+          ],
+          "success_probability": "60.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "几天",
+          "resources_needed": [
+            "行业标准文档",
+            "技术团队"
+          ],
+          "notes": "符合行业最佳实践，但需要适应具体系统"
+        },
+        {
+          "method": "合规替代方案",
+          "name": "业务需求分析",
+          "description": "通过业务需求推导API字段需求",
+          "steps": [
+            "1. 分析签约业务流程",
+            "2. 确定必要的数据字段",
+            "3. 参考类似系统的API设计",
+            "4. 创建假设的字段名列表",
+            "5. 通过测试验证假设"
+          ],
+          "prerequisites": [
+            "业务知识",
+            "系统分析能力",
+            "测试环境"
+          ],
+          "success_probability": "50.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "几天",
+          "resources_needed": [
+            "业务专家",
+            "技术团队"
+          ],
+          "notes": "完全合规，但准确率取决于分析质量"
+        }
+      ],
+      "high_risk_reference": [
+        {
+          "method": "技术手段",
+          "name": "网络流量分析",
+          "description": "通过代理捕获和分析API调用",
+          "steps": [
+            "1. 设置HTTP/HTTPS代理 (如mitmproxy)",
+            "2. 配置系统使用代理",
+            "3. 执行正常操作捕获流量",
+            "4. 分析请求/响应模式",
+            "5. 提取字段名和数据结构"
+          ],
+          "prerequisites": [
+            "代理设置权限",
+            "系统访问权限",
+            "流量分析工具"
+          ],
+          "success_probability": "90.0%",
+          "risk_level": "中风险",
+          "compliance_status": "可能不合规",
+          "estimated_time": "几小时到一天",
+          "resources_needed": [
+            "代理工具",
+            "分析工具",
+            "测试账号"
+          ],
+          "notes": "非常有效，但需要注意隐私和合规问题"
+        },
+        {
+          "method": "合规替代方案",
+          "name": "现有系统集成分析",
+          "description": "分析现有集成系统的API使用",
+          "steps": [
+            "1. 检查已有集成的系统",
+            "2. 分析集成代码和配置",
+            "3. 提取API调用示例",
+            "4. 验证字段名有效性",
+            "5. 创建API文档"
+          ],
+          "prerequisites": [
+            "现有集成系统访问权限",
+            "代码分析能力",
+            "测试验证能力"
+          ],
+          "success_probability": "90.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "几小时到一天",
+          "resources_needed": [
+            "集成系统",
+            "代码访问权限"
+          ],
+          "notes": "如果已有成功集成的系统，这是最佳合规方案"
+        },
+        {
+          "method": "官方渠道",
+          "name": "参加技术培训",
+          "description": "参加供应商组织的技术培训获取文档",
+          "steps": [
+            "1. 查询供应商培训计划",
+            "2. 报名参加技术培训",
+            "3. 参加培训获取资料",
+            "4. 与培训讲师建立联系",
+            "5. 获取后续技术支持"
+          ],
+          "prerequisites": [
+            "培训费用预算",
+            "技术人员时间",
+            "学习意愿"
+          ],
+          "success_probability": "80.0%",
+          "risk_level": "低风险",
+          "compliance_status": "合规",
+          "estimated_time": "1-2天培训 + 后续跟进",
+          "resources_needed": [
+            "培训费用",
+            "技术人员"
+          ],
+          "notes": "不仅能获取文档，还能获得实际操作经验"
+        }
+      ]
+    },
+    "next_steps": [
+      "1. 评估现有资源（时间、人员、预算）",
+      "2. 选择第一阶段的具体实施方案",
+      "3. 准备必要的授权和合规文件",
+      "4. 开始执行第一阶段计划",
+      "5. 定期评估进展并调整策略"
+    ]
+  },
+  "quick_recommendations": [
+    "1. 首先检查是否已有成功集成的系统可供分析",
+    "2. 尝试JavaScript源代码分析（完全合规且有效）",
+    "3. 考虑联系供应商获取官方文档（最合规）",
+    "4. 使用浏览器开发者工具分析网络请求",
+    "5. 检查常见Swagger/OpenAPI端点",
+    "6. 参考医疗行业标准API设计",
+    "7. 避免逆向工程等高风险方法",
+    "8. 确保所有方法符合服务条款和法律法规",
+    "9. 记录所有获取过程用于合规审计",
+    "10. 分阶段实施，从简单合规方法开始",
+    "11. 建立测试验证流程确保信息准确性",
+    "12. 创建完整的API文档和集成指南"
+  ]
+}

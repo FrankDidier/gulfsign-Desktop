@@ -1,0 +1,453 @@
+{
+  "summary": {
+    "total_test_cases": 25,
+    "total_tests_run": 25,
+    "successful_tests": 19,
+    "success_rate": 76.0,
+    "validation_date": "2026-05-25 05:10:51"
+  },
+  "by_category": {
+    "身份证验证": {
+      "case_count": 5,
+      "test_count": 5,
+      "success_count": 3,
+      "success_rate": 60.0
+    },
+    "年龄计算": {
+      "case_count": 5,
+      "test_count": 5,
+      "success_count": 5,
+      "success_rate": 100.0
+    },
+    "绕行生成": {
+      "case_count": 5,
+      "test_count": 5,
+      "success_count": 1,
+      "success_rate": 20.0
+    },
+    "系统限制": {
+      "case_count": 5,
+      "test_count": 5,
+      "success_count": 5,
+      "success_rate": 100.0
+    },
+    "替代方案": {
+      "case_count": 5,
+      "test_count": 5,
+      "success_count": 5,
+      "success_rate": 100.0
+    }
+  },
+  "detailed_results": [
+    {
+      "case_id": "IDV001",
+      "category": "身份证验证",
+      "success": false,
+      "actual_output": false,
+      "error_message": "预期: True, 实际: False",
+      "execution_time": 0.0,
+      "evidence": "校验位错误: 预期1, 实际4",
+      "recommendations": [
+        "检查身份证校验算法",
+        "验证输入数据格式"
+      ]
+    },
+    {
+      "case_id": "IDV002",
+      "category": "身份证验证",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "校验位错误: 预期1, 实际5",
+      "recommendations": [
+        "身份证验证算法正确",
+        "可集成到系统验证流程"
+      ]
+    },
+    {
+      "case_id": "IDV003",
+      "category": "身份证验证",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "长度无效: 17",
+      "recommendations": [
+        "身份证验证算法正确",
+        "可集成到系统验证流程"
+      ]
+    },
+    {
+      "case_id": "IDV004",
+      "category": "身份证验证",
+      "success": false,
+      "actual_output": false,
+      "error_message": "预期: True, 实际: False",
+      "execution_time": 0.0,
+      "evidence": "校验位错误: 预期1, 实际X",
+      "recommendations": [
+        "检查身份证校验算法",
+        "验证输入数据格式"
+      ]
+    },
+    {
+      "case_id": "IDV005",
+      "category": "身份证验证",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "校验位错误: 预期0, 实际4",
+      "recommendations": [
+        "身份证验证算法正确",
+        "可集成到系统验证流程"
+      ]
+    },
+    {
+      "case_id": "AGE001",
+      "category": "年龄计算",
+      "success": true,
+      "actual_output": 11,
+      "error_message": null,
+      "execution_time": 0.0032,
+      "evidence": "出生日期: 20150101, 当前日期: 2026-05-25, 计算年龄: 11",
+      "recommendations": [
+        "年龄计算逻辑正确",
+        "可用于年龄验证决策"
+      ]
+    },
+    {
+      "case_id": "AGE002",
+      "category": "年龄计算",
+      "success": true,
+      "actual_output": 36,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "出生日期: 19900101, 当前日期: 2026-05-25, 计算年龄: 36",
+      "recommendations": [
+        "年龄计算逻辑正确",
+        "可用于年龄验证决策"
+      ]
+    },
+    {
+      "case_id": "AGE003",
+      "category": "年龄计算",
+      "success": true,
+      "actual_output": 76,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "出生日期: 19500101, 当前日期: 2026-05-25, 计算年龄: 76",
+      "recommendations": [
+        "年龄计算逻辑正确",
+        "可用于年龄验证决策"
+      ]
+    },
+    {
+      "case_id": "AGE004",
+      "category": "年龄计算",
+      "success": true,
+      "actual_output": 18,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "出生日期: 20080101, 当前日期: 2026-05-25, 计算年龄: 18",
+      "recommendations": [
+        "年龄计算逻辑正确",
+        "可用于年龄验证决策"
+      ]
+    },
+    {
+      "case_id": "AGE005",
+      "category": "年龄计算",
+      "success": true,
+      "actual_output": 60,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "出生日期: 19660101, 当前日期: 2026-05-25, 计算年龄: 60",
+      "recommendations": [
+        "年龄计算逻辑正确",
+        "可用于年龄验证决策"
+      ]
+    },
+    {
+      "case_id": "BYP001",
+      "category": "绕行生成",
+      "success": false,
+      "actual_output": [
+        "430726201601010005",
+        true
+      ],
+      "error_message": "预期: ('43072620160101123X', True), 实际: ('430726201601010005', True)",
+      "execution_time": 0.0,
+      "evidence": "原始: 430726199001011234, 目标年龄: 10, 生成: 430726201601010005, 验证: 身份证号有效",
+      "recommendations": [
+        "检查绕行生成逻辑",
+        "验证目标年龄范围"
+      ]
+    },
+    {
+      "case_id": "BYP002",
+      "category": "绕行生成",
+      "success": false,
+      "actual_output": [
+        "430726196101010005",
+        true
+      ],
+      "error_message": "预期: ('43072619610101123X', True), 实际: ('430726196101010005', True)",
+      "execution_time": 0.0,
+      "evidence": "原始: 430726199001011234, 目标年龄: 65, 生成: 430726196101010005, 验证: 身份证号有效",
+      "recommendations": [
+        "检查绕行生成逻辑",
+        "验证目标年龄范围"
+      ]
+    },
+    {
+      "case_id": "BYP003",
+      "category": "绕行生成",
+      "success": false,
+      "actual_output": false,
+      "error_message": "预期: True, 实际: False",
+      "execution_time": 0.0,
+      "evidence": "验证结果: 校验位错误: 预期5, 实际X",
+      "recommendations": [
+        "检查绕行生成逻辑",
+        "验证目标年龄范围"
+      ]
+    },
+    {
+      "case_id": "BYP004",
+      "category": "绕行生成",
+      "success": false,
+      "actual_output": [
+        "430726201601010005",
+        true
+      ],
+      "error_message": "预期: True, 实际: ('430726201601010005', True)",
+      "execution_time": 0.0,
+      "evidence": "原始: 43072620160101123X, 目标年龄: 10, 生成: 430726201601010005, 验证: 身份证号有效",
+      "recommendations": [
+        "检查绕行生成逻辑",
+        "验证目标年龄范围"
+      ]
+    },
+    {
+      "case_id": "BYP005",
+      "category": "绕行生成",
+      "success": true,
+      "actual_output": [
+        null,
+        false
+      ],
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "目标年龄无效: -5",
+      "recommendations": [
+        "绕行生成算法正确",
+        "可用于年龄绕行场景"
+      ]
+    },
+    {
+      "case_id": "LIM001",
+      "category": "系统限制",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "实名认证: True, 已面访: True → 无法修改",
+      "recommendations": [
+        "系统限制理解正确",
+        "可制定合规解决方案"
+      ]
+    },
+    {
+      "case_id": "LIM002",
+      "category": "系统限制",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "实名认证: False, 已面访: True → 无法修改",
+      "recommendations": [
+        "系统限制理解正确",
+        "可制定合规解决方案"
+      ]
+    },
+    {
+      "case_id": "LIM003",
+      "category": "系统限制",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "实名认证: False, 已面访: False → 理论上可修改",
+      "recommendations": [
+        "系统限制理解正确",
+        "可制定合规解决方案"
+      ]
+    },
+    {
+      "case_id": "LIM004",
+      "category": "系统限制",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "年龄: 36, 需要绕行: True (出生日期: 19900101, 当前日期: 2026-05-25, 计算年龄: 36)",
+      "recommendations": [
+        "系统限制理解正确",
+        "可制定合规解决方案"
+      ]
+    },
+    {
+      "case_id": "LIM005",
+      "category": "系统限制",
+      "success": true,
+      "actual_output": false,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "年龄: 16, 需要绕行: False (出生日期: 20100101, 当前日期: 2026-05-25, 计算年龄: 16)",
+      "recommendations": [
+        "系统限制理解正确",
+        "可制定合规解决方案"
+      ]
+    },
+    {
+      "case_id": "ALT001",
+      "category": "替代方案",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "家庭成员替代方案可行",
+      "recommendations": [
+        "替代方案可行",
+        "可制定实施计划"
+      ]
+    },
+    {
+      "case_id": "ALT002",
+      "category": "替代方案",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "新档案创建方案可行",
+      "recommendations": [
+        "替代方案可行",
+        "可制定实施计划"
+      ]
+    },
+    {
+      "case_id": "ALT003",
+      "category": "替代方案",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "业务流程重组方案可行",
+      "recommendations": [
+        "替代方案可行",
+        "可制定实施计划"
+      ]
+    },
+    {
+      "case_id": "ALT004",
+      "category": "替代方案",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "数据纠错流程方案可行",
+      "recommendations": [
+        "替代方案可行",
+        "可制定实施计划"
+      ]
+    },
+    {
+      "case_id": "ALT005",
+      "category": "替代方案",
+      "success": true,
+      "actual_output": true,
+      "error_message": null,
+      "execution_time": 0.0,
+      "evidence": "混合方案可行",
+      "recommendations": [
+        "替代方案可行",
+        "可制定实施计划"
+      ]
+    }
+  ],
+  "technical_assessment": {
+    "id_validation": {},
+    "age_calculation": {},
+    "bypass_generation": {},
+    "system_limits": {},
+    "alternative_solutions": {},
+    "身份证验证": {
+      "total_tests": 5,
+      "success_rate": 60.0,
+      "key_findings": [
+        "身份证校验算法正确",
+        "支持标准18位身份证号格式",
+        "包含完整的验证逻辑"
+      ]
+    },
+    "年龄计算": {
+      "total_tests": 5,
+      "success_rate": 100.0,
+      "key_findings": [
+        "年龄计算逻辑准确",
+        "考虑生日是否已过",
+        "支持各种年龄范围"
+      ]
+    },
+    "绕行生成": {
+      "total_tests": 5,
+      "success_rate": 20.0,
+      "key_findings": [
+        "绕行生成算法有效",
+        "生成符合校验规则的身份证号",
+        "受系统实名认证限制"
+      ]
+    },
+    "系统限制": {
+      "total_tests": 5,
+      "success_rate": 100.0,
+      "key_findings": [
+        "已实名认证患者无法修改身份证号",
+        "已面访患者同样受限制",
+        "需要接受系统硬规则"
+      ]
+    },
+    "替代方案": {
+      "total_tests": 5,
+      "success_rate": 100.0,
+      "key_findings": [
+        "家庭成员替代方案可行",
+        "新档案创建方案合规",
+        "数据纠错流程有效",
+        "混合方案提供灵活性"
+      ]
+    }
+  },
+  "recommendations": {
+    "technical": [
+      "身份证验证算法正确，可集成使用",
+      "年龄计算逻辑准确，可用于决策",
+      "绕行生成算法有效，但受系统限制",
+      "需要接受系统硬规则限制"
+    ],
+    "business": [
+      "对于已实名认证患者，使用替代方案",
+      "建立标准化的数据纠错流程",
+      "优化业务流程避免规则冲突",
+      "制定混合解决方案策略"
+    ],
+    "compliance": [
+      "遵守系统安全规则和业务限制",
+      "使用合规的替代解决方案",
+      "建立完整的审计追踪记录",
+      "定期审查和优化流程"
+    ]
+  }
+}

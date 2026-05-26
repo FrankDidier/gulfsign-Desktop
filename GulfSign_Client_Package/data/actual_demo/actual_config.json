@@ -1,0 +1,18 @@
+{
+  "license_account": "actual_demo_account",
+  "license_password": "ENC:demo_encrypted_password_123",
+  "ggws_base_url": "https://ggws.hnhfpc.gov.cn",
+  "doctor_name": "演示医生",
+  "doctor_team": "家庭医生演示团队",
+  "population_type": "全人群",
+  "max_contracts": 1000,
+  "request_delay": 1.0,
+  "batch_max_workers": 20,
+  "batch_size": 2,
+  "log_dir": "logs",
+  "success_log_dir": "logs/成功",
+  "encryption_enabled": true,
+  "auto_backup": true,
+  "created_at": "2026-05-24T04:53:18.426450",
+  "demo_purpose": "实际系统功能演示"
+}

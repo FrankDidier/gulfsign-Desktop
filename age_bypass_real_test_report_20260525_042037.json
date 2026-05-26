@@ -1,0 +1,133 @@
+{
+  "timestamp": "2026-05-25 04:20:37",
+  "summary": {
+    "total_tests": 6,
+    "passed_tests": 4,
+    "failed_tests": 2,
+    "pass_rate": "66.7%",
+    "total_execution_time": 4.448363304138184
+  },
+  "test_results": [
+    {
+      "test_name": "加载配置文件",
+      "success": true,
+      "message": "配置文件加载成功",
+      "execution_time": 0.00019502639770507812
+    },
+    {
+      "test_name": "初始化客户端",
+      "success": true,
+      "message": "客户端初始化成功",
+      "execution_time": 8.702278137207031e-05
+    },
+    {
+      "test_name": "身份证验证逻辑测试",
+      "success": false,
+      "message": "身份证验证逻辑测试: 4/7 通过",
+      "execution_time": 4.792213439941406e-05
+    },
+    {
+      "test_name": "年龄绕行身份证生成测试",
+      "success": true,
+      "message": "年龄绕行生成测试: 3/3 有效, 3/3 年龄匹配",
+      "execution_time": 2.288818359375e-05
+    },
+    {
+      "test_name": "实名认证限制测试",
+      "success": true,
+      "message": "实名认证限制分析完成",
+      "execution_time": 1.1920928955078125e-06
+    },
+    {
+      "test_name": "系统登录测试",
+      "success": false,
+      "message": "系统登录失败: 登录失败：密码错误1次，还剩4次用户自动锁定30分钟。",
+      "execution_time": 4.448009252548218
+    }
+  ],
+  "critical_issues": [
+    {
+      "test": "身份证验证逻辑测试",
+      "message": "身份证验证逻辑测试: 4/7 通过",
+      "details": {
+        "total_tests": 7,
+        "passed_tests": 4,
+        "pass_rate": "57.1%",
+        "validation_results": [
+          {
+            "id_card": "430726199001011234",
+            "is_valid": false,
+            "age": 36,
+            "needs_bypass": true,
+            "expected_valid": true,
+            "match": false
+          },
+          {
+            "id_card": "430726201001011234",
+            "is_valid": false,
+            "age": 16,
+            "needs_bypass": false,
+            "expected_valid": true,
+            "match": false
+          },
+          {
+            "id_card": "430726195001011234",
+            "is_valid": false,
+            "age": 76,
+            "needs_bypass": false,
+            "expected_valid": true,
+            "match": false
+          },
+          {
+            "id_card": "43072619900101123",
+            "is_valid": false,
+            "age": 36,
+            "needs_bypass": true,
+            "expected_valid": false,
+            "match": true
+          },
+          {
+            "id_card": "4307261990010112345",
+            "is_valid": false,
+            "age": 36,
+            "needs_bypass": true,
+            "expected_valid": false,
+            "match": true
+          },
+          {
+            "id_card": "4307261990A1011234",
+            "is_valid": false,
+            "age": -1,
+            "needs_bypass": false,
+            "expected_valid": false,
+            "match": true
+          },
+          {
+            "id_card": "123456789012345678",
+            "is_valid": false,
+            "age": -5865,
+            "needs_bypass": false,
+            "expected_valid": false,
+            "match": true
+          }
+        ]
+      }
+    },
+    {
+      "test": "系统登录测试",
+      "message": "系统登录失败: 登录失败：密码错误1次，还剩4次用户自动锁定30分钟。",
+      "details": {
+        "error_message": "登录失败：密码错误1次，还剩4次用户自动锁定30分钟。",
+        "suggested_action": "检查凭证是否正确，或联系系统管理员"
+      }
+    }
+  ],
+  "recommendations": [
+    "1. 获取正确的系统登录凭证进行实际测试",
+    "2. 联系系统管理员确认账号权限",
+    "3. 年龄绕行逻辑验证通过，可在实际系统中测试",
+    "4. 系统硬限制已确认，需要业务流程调整而非技术绕过",
+    "5. 考虑使用测试环境进行完整的功能验证",
+    "6. 记录所有测试结果用于项目文档"
+  ]
+}

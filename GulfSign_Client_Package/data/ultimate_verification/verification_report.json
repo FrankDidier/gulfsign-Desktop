@@ -1,0 +1,168 @@
+{
+  "verification_summary": {
+    "total_steps": 15,
+    "passed_steps": 13,
+    "failed_steps": 2,
+    "pass_rate": 86.66666666666667,
+    "verification_time": "2026-05-24T04:58:41.645650",
+    "verification_directory": "/Users/vv/Desktop/工作组《260329_系统开发_湾流》/gulfsign-desktop/ultimate_verification"
+  },
+  "performance_metrics": {
+    "avg_processing_time_per_person": 0.3646366000175476,
+    "total_processing_time": 2.917092800140381,
+    "throughput": 2.7424564620004586,
+    "success_rate": 100.0
+  },
+  "file_system_summary": {
+    "total_files": 3,
+    "total_size": 16202,
+    "file_types": {
+      ".xlsx": 3
+    },
+    "created_log_files": 3
+  },
+  "detailed_steps": [
+    {
+      "step": "系统组件导入",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.567463",
+      "details": "成功导入 8 个组件"
+    },
+    {
+      "step": "配置管理器初始化",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.567688",
+      "details": {
+        "配置目录": "config_demo",
+        "字段总数": 36,
+        "必需字段": "全部存在"
+      }
+    },
+    {
+      "step": "配置保存功能",
+      "status": "FAIL",
+      "timestamp": "2026-05-24T04:58:38.567721",
+      "details": "配置保存失败"
+    },
+    {
+      "step": "配置重新加载",
+      "status": "FAIL",
+      "timestamp": "2026-05-24T04:58:38.567746",
+      "details": "重新加载数据不一致"
+    },
+    {
+      "step": "加密工具初始化",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.590353",
+      "details": {
+        "AES密钥长度": "32字节 (256位)",
+        "AES IV长度": "16字节 (128位)",
+        "RSA公钥": "已加载"
+      }
+    },
+    {
+      "step": "AES加密/解密",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.593362",
+      "details": {
+        "原始数据大小": "113字符",
+        "加密数据大小": "160字节",
+        "解密验证": "数据完整无损"
+      }
+    },
+    {
+      "step": "RSA加密功能",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.594138",
+      "details": {
+        "加密前密钥大小": "32字节",
+        "加密后密钥大小": "256字节",
+        "加密算法": "RSA-2048-OAEP"
+      }
+    },
+    {
+      "step": "完整加密请求",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.594688",
+      "details": {
+        "请求字段": "全部存在",
+        "加密密钥": "344字符",
+        "加密IV": "24字符",
+        "加密数据": "280字符",
+        "时间戳": "1779569918594"
+      }
+    },
+    {
+      "step": "批量处理器初始化",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.594878",
+      "details": {
+        "工作线程数": 4,
+        "批量大小": 2,
+        "日志目录": "batch_demo"
+      }
+    },
+    {
+      "step": "任务添加功能",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:38.594926",
+      "details": {
+        "添加任务数": 8,
+        "任务ID示例": "task_1779569918594_0"
+      }
+    },
+    {
+      "step": "批量处理执行",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:41.512068",
+      "details": {
+        "总任务数": 8,
+        "成功任务数": 8,
+        "总处理时间": "2.92秒",
+        "平均处理时间": "0.36秒/人",
+        "吞吐量": "2.7人/秒"
+      }
+    },
+    {
+      "step": "日志记录器初始化",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:41.513710",
+      "details": {
+        "日志目录": "log_demo",
+        "成功日志目录": "成功"
+      }
+    },
+    {
+      "step": "日志记录功能",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:41.635609",
+      "details": {
+        "创建日志文件数": 3,
+        "文件示例": "log_verification_account_000.xlsx"
+      }
+    },
+    {
+      "step": "日志文件验证",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:41.645015",
+      "details": {
+        "有效日志文件数": 3,
+        "总日志文件数": 3,
+        "验证成功率": "100.0%"
+      }
+    },
+    {
+      "step": "文件系统操作",
+      "status": "PASS",
+      "timestamp": "2026-05-24T04:58:41.645471",
+      "details": {
+        "总文件数": 3,
+        "总大小": "16202 字节",
+        "文件类型": {
+          ".xlsx": 3
+        },
+        "目录结构": "8 个项目"
+      }
+    }
+  ]
+}

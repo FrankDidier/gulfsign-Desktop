@@ -1,0 +1,26 @@
+{
+  "verification_time": "2026-05-24T05:02:52.164258",
+  "config_file": "/Users/vv/Desktop/工作组《260329_系统开发_湾流》/gulfsign-desktop/gulfsign_config.json",
+  "config_fields": [
+    "license_account",
+    "license_password"
+  ],
+  "config_manager_fields": 38,
+  "required_fields_status": {
+    "username": false,
+    "password": false,
+    "url": false,
+    "account": false,
+    "org_code": false,
+    "doctor": false,
+    "team": false
+  },
+  "save_test_result": false,
+  "files_created": [
+    {
+      "name": "gulfsign_config.json",
+      "size": 121,
+      "path": "gulfsign_config.json"
+    }
+  ]
+}

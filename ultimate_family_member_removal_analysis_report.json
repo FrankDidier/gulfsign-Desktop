@@ -1,0 +1,487 @@
+{
+  "summary": {
+    "total_business_rules": 8,
+    "total_test_scenarios": 10,
+    "total_analysis_results": 10,
+    "feasible_scenarios": 5,
+    "conditional_scenarios": 3,
+    "not_feasible_scenarios": 2,
+    "analysis_date": "2026-05-25 04:58:01"
+  },
+  "business_rules": {
+    "BR001": {
+      "name": "已签约家庭成员不可移除",
+      "description": "任何状态的签约记录（STATUS=5,6,0）都禁止移除家庭成员",
+      "type": "system",
+      "enforcement_level": "strict",
+      "exceptions": [
+        "合同终止后",
+        "系统管理员操作"
+      ],
+      "impact_level": "high",
+      "bypass_possible": false
+    },
+    "BR002": {
+      "name": "家庭关系完整性保护",
+      "description": "确保家庭关系数据的完整性和一致性",
+      "type": "business",
+      "enforcement_level": "strict",
+      "exceptions": [
+        "数据纠错流程"
+      ],
+      "impact_level": "high",
+      "bypass_possible": false
+    },
+    "BR003": {
+      "name": "服务记录关联检查",
+      "description": "检查成员是否有未完成的服务记录",
+      "type": "business",
+      "enforcement_level": "moderate",
+      "exceptions": [
+        "服务记录转移",
+        "管理员覆盖"
+      ],
+      "impact_level": "medium",
+      "bypass_possible": true
+    },
+    "BR004": {
+      "name": "健康档案关联保护",
+      "description": "保护与健康档案的关联关系",
+      "type": "technical",
+      "enforcement_level": "strict",
+      "exceptions": [
+        "档案迁移",
+        "档案合并"
+      ],
+      "impact_level": "high",
+      "bypass_possible": false
+    },
+    "BR005": {
+      "name": "权限分级控制",
+      "description": "不同权限级别有不同的操作限制",
+      "type": "compliance",
+      "enforcement_level": "strict",
+      "exceptions": [
+        "紧急情况授权"
+      ],
+      "impact_level": "high",
+      "bypass_possible": true
+    },
+    "BR006": {
+      "name": "审计追踪要求",
+      "description": "所有家庭成员变更必须记录审计日志",
+      "type": "compliance",
+      "enforcement_level": "strict",
+      "exceptions": [
+        "系统维护操作"
+      ],
+      "impact_level": "medium",
+      "bypass_possible": false
+    },
+    "BR007": {
+      "name": "数据保留策略",
+      "description": "已移除成员数据需要按策略保留",
+      "type": "compliance",
+      "enforcement_level": "moderate",
+      "exceptions": [
+        "法律要求删除"
+      ],
+      "impact_level": "medium",
+      "bypass_possible": true
+    },
+    "BR008": {
+      "name": "业务流程依赖检查",
+      "description": "检查成员是否参与未完成的业务流程",
+      "type": "business",
+      "enforcement_level": "moderate",
+      "exceptions": [
+        "流程终止",
+        "流程转移"
+      ],
+      "impact_level": "medium",
+      "bypass_possible": true
+    }
+  },
+  "test_scenarios": [
+    {
+      "id": "TS001",
+      "name": "直接调用removeFamilyMember接口",
+      "type": "直接移除",
+      "description": "尝试直接调用removeFamilyMember接口移除成员",
+      "preconditions": [
+        "家庭存在",
+        "成员存在",
+        "有移除权限"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR002",
+        "BR006"
+      ],
+      "expected_outcome": "failure",
+      "compliance_status": "non-compliant"
+    },
+    {
+      "id": "TS002",
+      "name": "通过家庭解散间接移除",
+      "type": "间接移除",
+      "description": "尝试解散整个家庭来间接移除成员",
+      "preconditions": [
+        "家庭可解散",
+        "无活跃合同",
+        "有解散权限"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR003",
+        "BR008"
+      ],
+      "expected_outcome": "conditional",
+      "compliance_status": "questionable"
+    },
+    {
+      "id": "TS003",
+      "name": "通过合同终止流程移除",
+      "type": "业务例外",
+      "description": "先终止家庭合同，然后移除成员",
+      "preconditions": [
+        "合同可终止",
+        "有终止权限",
+        "符合终止条件"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR003",
+        "BR008"
+      ],
+      "expected_outcome": "conditional",
+      "compliance_status": "compliant"
+    },
+    {
+      "id": "TS004",
+      "name": "数据纠错流程移除",
+      "type": "业务例外",
+      "description": "通过数据纠错工单流程移除错误添加的成员",
+      "preconditions": [
+        "成员添加错误",
+        "有纠错申请权限",
+        "可提供证据"
+      ],
+      "business_rules": [
+        "BR002",
+        "BR004",
+        "BR007"
+      ],
+      "expected_outcome": "success",
+      "compliance_status": "compliant"
+    },
+    {
+      "id": "TS005",
+      "name": "利用系统缓存不一致",
+      "type": "系统绕过",
+      "description": "尝试利用系统缓存不一致绕过业务规则",
+      "preconditions": [
+        "系统有多级缓存",
+        "缓存同步有延迟",
+        "可控制请求时序"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR002",
+        "BR005"
+      ],
+      "expected_outcome": "failure",
+      "compliance_status": "non-compliant"
+    },
+    {
+      "id": "TS006",
+      "name": "超级管理员直接数据库修改",
+      "type": "管理员覆盖",
+      "description": "超级管理员直接修改数据库移除成员关系",
+      "preconditions": [
+        "有数据库访问权限",
+        "知道表结构",
+        "有操作权限"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR002",
+        "BR006"
+      ],
+      "expected_outcome": "success",
+      "compliance_status": "questionable"
+    },
+    {
+      "id": "TS007",
+      "name": "创建新家庭替代移除",
+      "type": "替代路径",
+      "description": "创建不包含该成员的新家庭，而不是从原家庭移除",
+      "preconditions": [
+        "允许创建新家庭",
+        "成员可加入新家庭",
+        "业务逻辑支持"
+      ],
+      "business_rules": [
+        "BR002",
+        "BR004",
+        "BR007"
+      ],
+      "expected_outcome": "success",
+      "compliance_status": "compliant"
+    },
+    {
+      "id": "TS008",
+      "name": "成员状态标记而非移除",
+      "type": "替代路径",
+      "description": "将成员标记为'已离开'或'非活跃'，而不是物理移除",
+      "preconditions": [
+        "系统支持状态标记",
+        "业务接受状态概念",
+        "有标记权限"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR003",
+        "BR007"
+      ],
+      "expected_outcome": "success",
+      "compliance_status": "compliant"
+    },
+    {
+      "id": "TS009",
+      "name": "修改合同排除特定成员",
+      "type": "合同操作",
+      "description": "修改合同内容，使其不适用于特定成员",
+      "preconditions": [
+        "合同可修改",
+        "有修改权限",
+        "业务规则允许"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR003",
+        "BR008"
+      ],
+      "expected_outcome": "conditional",
+      "compliance_status": "questionable"
+    },
+    {
+      "id": "TS010",
+      "name": "业务流程重组方案",
+      "type": "替代路径",
+      "description": "重新设计业务流程，避免需要移除成员",
+      "preconditions": [
+        "业务流程可调整",
+        "有流程设计权限",
+        "业务需求允许"
+      ],
+      "business_rules": [
+        "BR001",
+        "BR003",
+        "BR008"
+      ],
+      "expected_outcome": "success",
+      "compliance_status": "compliant"
+    }
+  ],
+  "analysis_results": [
+    {
+      "scenario_id": "TS001",
+      "scenario_name": "直接调用removeFamilyMember接口",
+      "feasibility": "not_feasible",
+      "feasibility_reason": "系统硬规则：已签约家庭成员不可移除",
+      "business_impact": "业务中断",
+      "compliance_risk": "高风险",
+      "technical_complexity": "低",
+      "recommended_approach": "使用替代方案（创建新家庭或状态标记）",
+      "alternative_solutions": [
+        "TS007",
+        "TS008"
+      ],
+      "evidence": "基于业务规则 BR001, BR002, BR006 的分析结果"
+    },
+    {
+      "scenario_id": "TS002",
+      "scenario_name": "通过家庭解散间接移除",
+      "feasibility": "conditional",
+      "feasibility_reason": "家庭解散需要满足无活跃合同条件",
+      "business_impact": "中等业务影响",
+      "compliance_risk": "中等风险",
+      "technical_complexity": "中等",
+      "recommended_approach": "先终止所有合同，再解散家庭",
+      "alternative_solutions": [
+        "TS003",
+        "TS007"
+      ],
+      "evidence": "基于业务规则 BR001, BR003, BR008 的分析结果"
+    },
+    {
+      "scenario_id": "TS003",
+      "scenario_name": "通过合同终止流程移除",
+      "feasibility": "conditional",
+      "feasibility_reason": "合同终止需要符合终止条件和权限",
+      "business_impact": "可控业务影响",
+      "compliance_risk": "低风险",
+      "technical_complexity": "中等",
+      "recommended_approach": "遵循正规合同终止流程",
+      "alternative_solutions": [
+        "TS004",
+        "TS008"
+      ],
+      "evidence": "基于业务规则 BR001, BR003, BR008 的分析结果"
+    },
+    {
+      "scenario_id": "TS004",
+      "scenario_name": "数据纠错流程移除",
+      "feasibility": "feasible",
+      "feasibility_reason": "正规数据纠错流程，有审计追踪",
+      "business_impact": "最小业务影响",
+      "compliance_risk": "低风险",
+      "technical_complexity": "低",
+      "recommended_approach": "提交完整证据，等待人工处理",
+      "alternative_solutions": [
+        "TS008",
+        "TS010"
+      ],
+      "evidence": "基于业务规则 BR002, BR004, BR007 的分析结果"
+    },
+    {
+      "scenario_id": "TS005",
+      "scenario_name": "利用系统缓存不一致",
+      "feasibility": "not_feasible",
+      "feasibility_reason": "系统有缓存一致性机制和安全防护",
+      "business_impact": "系统安全风险",
+      "compliance_risk": "高风险",
+      "technical_complexity": "高",
+      "recommended_approach": "不推荐，使用合规方案",
+      "alternative_solutions": [
+        "TS004",
+        "TS007"
+      ],
+      "evidence": "基于业务规则 BR001, BR002, BR005 的分析结果"
+    },
+    {
+      "scenario_id": "TS006",
+      "scenario_name": "超级管理员直接数据库修改",
+      "feasibility": "feasible",
+      "feasibility_reason": "技术上可行，但需要超级管理员权限",
+      "business_impact": "高业务风险",
+      "compliance_risk": "高风险",
+      "technical_complexity": "高",
+      "recommended_approach": "仅限紧急情况，需完整审计日志",
+      "alternative_solutions": [
+        "TS004",
+        "TS008"
+      ],
+      "evidence": "基于业务规则 BR001, BR002, BR006 的分析结果"
+    },
+    {
+      "scenario_id": "TS007",
+      "scenario_name": "创建新家庭替代移除",
+      "feasibility": "feasible",
+      "feasibility_reason": "合规替代方案，不违反系统规则",
+      "business_impact": "低业务影响",
+      "compliance_risk": "低风险",
+      "technical_complexity": "中等",
+      "recommended_approach": "推荐方案，保持数据完整性",
+      "alternative_solutions": [
+        "TS008",
+        "TS010"
+      ],
+      "evidence": "基于业务规则 BR002, BR004, BR007 的分析结果"
+    },
+    {
+      "scenario_id": "TS008",
+      "scenario_name": "成员状态标记而非移除",
+      "feasibility": "feasible",
+      "feasibility_reason": "业务可接受的软删除方案",
+      "business_impact": "最小业务影响",
+      "compliance_risk": "低风险",
+      "technical_complexity": "低",
+      "recommended_approach": "最佳实践方案，推荐使用",
+      "alternative_solutions": [
+        "TS007",
+        "TS010"
+      ],
+      "evidence": "基于业务规则 BR001, BR003, BR007 的分析结果"
+    },
+    {
+      "scenario_id": "TS009",
+      "scenario_name": "修改合同排除特定成员",
+      "feasibility": "conditional",
+      "feasibility_reason": "需要合同修改权限和业务规则支持",
+      "business_impact": "中等业务影响",
+      "compliance_risk": "中等风险",
+      "technical_complexity": "中等",
+      "recommended_approach": "与业务部门协调，确保合规",
+      "alternative_solutions": [
+        "TS003",
+        "TS008"
+      ],
+      "evidence": "基于业务规则 BR001, BR003, BR008 的分析结果"
+    },
+    {
+      "scenario_id": "TS010",
+      "scenario_name": "业务流程重组方案",
+      "feasibility": "feasible",
+      "feasibility_reason": "从根本上解决问题，避免规则冲突",
+      "business_impact": "长期业务优化",
+      "compliance_risk": "低风险",
+      "technical_complexity": "高",
+      "recommended_approach": "战略级解决方案，需要资源投入",
+      "alternative_solutions": [
+        "TS007",
+        "TS008"
+      ],
+      "evidence": "基于业务规则 BR001, BR003, BR008 的分析结果"
+    }
+  ],
+  "recommendations": {
+    "compliant_solutions": [
+      {
+        "scenario": "数据纠错流程移除",
+        "approach": "提交完整证据，等待人工处理",
+        "business_impact": "最小业务影响"
+      },
+      {
+        "scenario": "创建新家庭替代移除",
+        "approach": "推荐方案，保持数据完整性",
+        "business_impact": "低业务影响"
+      },
+      {
+        "scenario": "成员状态标记而非移除",
+        "approach": "最佳实践方案，推荐使用",
+        "business_impact": "最小业务影响"
+      },
+      {
+        "scenario": "业务流程重组方案",
+        "approach": "战略级解决方案，需要资源投入",
+        "business_impact": "长期业务优化"
+      }
+    ],
+    "high_risk_warnings": [
+      {
+        "scenario": "直接调用removeFamilyMember接口",
+        "risk": "高风险",
+        "warning": "不推荐使用，存在合规和安全风险"
+      },
+      {
+        "scenario": "利用系统缓存不一致",
+        "risk": "高风险",
+        "warning": "不推荐使用，存在合规和安全风险"
+      },
+      {
+        "scenario": "超级管理员直接数据库修改",
+        "risk": "高风险",
+        "warning": "不推荐使用，存在合规和安全风险"
+      }
+    ],
+    "strategic_advice": [
+      "接受系统业务规则限制，寻找合规替代方案",
+      "优先使用状态标记而非物理移除",
+      "建立标准化的数据纠错流程",
+      "考虑业务流程重组避免规则冲突",
+      "保留完整的审计追踪记录"
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "test_config": {
+    "username": "config_test_user",
+    "password": "config_test_password_123",
+    "license_account": "license_test_account",
+    "license_password": "license_test_password_456",
+    "url": "https://ggws.hnhfpc.gov.cn",
+    "doctor": "加密测试医生",
+    "team": "加密测试团队"
+  },
+  "request_data": {
+    "account": "encryption_test_account",
+    "timestamp": 1779570695055,
+    "data": {
+      "username": "test_user_encrypted",
+      "password": "test_password_encrypted",
+      "license_key": "TEST-LICENSE-20260524-001",
+      "expiry_date": "2026-12-31",
+      "features": [
+        "family_doctor",
+        "population_coverage",
+        "batch_processing"
+      ]
+    }
+  },
+  "test_cases": [
+    [
+      "短文本",
+      "这是短文本测试"
+    ],
+    [
+      "中文本",
+      "这是中等长度的测试文本，包含一些中文和数字123"
+    ],
+    [
+      "长文本",
+      "这是较长的测试文本，用于验证加密性能。包含多种字符：中文、英文、数字123、特殊字符!@#$%^&*()。重复多次以增加长度。这是较长的测试文本，用于验证加密性能。包含多种字符：中文、英文、数字123、特殊字符!@#$%^&*()。重复多次以增加长度。这是较长的测试文本，用于验证加密性能。包含多种字符：中文、英文、数字123、特殊字符!@#$%^&*()。重复多次以增加长度。这是较长的测试文本，用于验证加密性能。包含多种字符：中文、英文、数字123、特殊字符!@#$%^&*()。重复多次以增加长度。这是较长的测试文本，用于验证加密性能。包含多种字符：中文、英文、数字123、特殊字符!@#$%^&*()。重复多次以增加长度。"
+    ],
+    [
+      "JSON数据",
+      "{\"user\": \"performance_test_user\", \"data\": [\"item1\", \"item2\", \"item3\", \"item4\", \"item5\"], \"config\": {\"setting1\": \"value1\", \"setting2\": \"value2\"}, \"timestamp\": 1779570695064}"
+    ]
+  ]
+}

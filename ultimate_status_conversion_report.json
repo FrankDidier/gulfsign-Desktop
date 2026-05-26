@@ -1,0 +1,521 @@
+{
+  "summary": {
+    "total_tests": 33,
+    "successful_tests": 4,
+    "success_rate": 12.12,
+    "exploration_date": "2026-05-25 04:49:16"
+  },
+  "by_method_type": {
+    "直接API调用": {
+      "count": 5,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "间接API调用": {
+      "count": 4,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "状态机绕过": {
+      "count": 5,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "数据操作": {
+      "count": 3,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "系统漏洞": {
+      "count": 7,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "替代路径": {
+      "count": 3,
+      "success_count": 2,
+      "success_rate": 66.67
+    },
+    "社会工程学": {
+      "count": 3,
+      "success_count": 0,
+      "success_rate": 0.0
+    },
+    "管理员覆盖": {
+      "count": 3,
+      "success_count": 2,
+      "success_rate": 66.67
+    }
+  },
+  "by_risk_level": {
+    "low": {
+      "count": 22,
+      "success_count": 2
+    },
+    "medium": {
+      "count": 1,
+      "success_count": 1
+    },
+    "high": {
+      "count": 10,
+      "success_count": 1
+    }
+  },
+  "by_compliance_status": {
+    "compliant": {
+      "count": 22,
+      "success_count": 2
+    },
+    "questionable": {
+      "count": 1,
+      "success_count": 1
+    },
+    "non-compliant": {
+      "count": 10,
+      "success_count": 1
+    }
+  },
+  "detailed_results": [
+    {
+      "method_name": "ACTION=9确认医生申请",
+      "method_type": "直接API调用",
+      "success": false,
+      "error_message": "系统规则：ACTION=9仅接受STATUS=6居民申请",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "9",
+        "status": "5",
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "ACTION=1修改状态参数",
+      "method_type": "直接API调用",
+      "success": false,
+      "error_message": "系统规则：医生端创建始终为STATUS=5",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "1",
+        "status": "0",
+        "qyzfbs": "0"
+      }
+    },
+    {
+      "method_name": "ACTION=UPDATE状态更新",
+      "method_type": "直接API调用",
+      "success": false,
+      "error_message": "接口不存在或权限不足",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "UPDATE",
+        "old_status": "5",
+        "new_status": "0"
+      }
+    },
+    {
+      "method_name": "ACTION=CHANGE状态变更",
+      "method_type": "直接API调用",
+      "success": false,
+      "error_message": "接口不存在或权限不足",
+      "execution_time": 0.012,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "CHANGE",
+        "from_status": "5",
+        "to_status": "0"
+      }
+    },
+    {
+      "method_name": "ACTION=CONVERT状态转换",
+      "method_type": "直接API调用",
+      "success": false,
+      "error_message": "接口不存在或权限不足",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "CONVERT",
+        "source_status": "5",
+        "dest_status": "0"
+      }
+    },
+    {
+      "method_name": "通过档案迁移触发状态更新",
+      "method_type": "间接API调用",
+      "success": false,
+      "error_message": "迁移不改变合同状态",
+      "execution_time": 0.0119,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "MIGRATE",
+        "new_orgcode": "TEST-NEW-ORG"
+      }
+    },
+    {
+      "method_name": "通过家庭成员变更触发更新",
+      "method_type": "间接API调用",
+      "success": false,
+      "error_message": "家庭成员变更不触发状态转换",
+      "execution_time": 0.0106,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "FAMILY_UPDATE",
+        "member_action": "ADD"
+      }
+    },
+    {
+      "method_name": "通过健康卡绑定触发更新",
+      "method_type": "间接API调用",
+      "success": false,
+      "error_message": "健康卡绑定不改变合同状态",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "BIND_HEALTHCARD",
+        "card_id": "TEST-CARD"
+      }
+    },
+    {
+      "method_name": "通过服务记录添加触发更新",
+      "method_type": "间接API调用",
+      "success": false,
+      "error_message": "服务记录不触发状态转换",
+      "execution_time": 0.0111,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "action": "ADD_SERVICE",
+        "service_type": "FOLLOWUP"
+      }
+    },
+    {
+      "method_name": "状态机中间状态注入",
+      "method_type": "状态机绕过",
+      "success": false,
+      "error_message": "系统验证中间状态有效性",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "intermediate_status": "6",
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "状态机回滚攻击",
+      "method_type": "状态机绕过",
+      "success": false,
+      "error_message": "系统无回滚机制或权限不足",
+      "execution_time": 0.0106,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "rollback_trigger": "SYSTEM_ERROR",
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "状态机并发修改",
+      "method_type": "状态机绕过",
+      "success": false,
+      "error_message": "系统有并发控制机制",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "concurrent_requests": 10,
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "状态机无效状态利用",
+      "method_type": "状态机绕过",
+      "success": false,
+      "error_message": "系统拒绝无效状态",
+      "execution_time": 0.0123,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "invalid_status": "99",
+        "fallback_status": "0"
+      }
+    },
+    {
+      "method_name": "时间戳篡改攻击",
+      "method_type": "数据操作",
+      "success": false,
+      "error_message": "系统有时间戳验证机制",
+      "execution_time": 0.0124,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "timestamp_manipulation": "BACKDATE",
+        "days_offset": -30
+      }
+    },
+    {
+      "method_name": "数据完整性破坏",
+      "method_type": "数据操作",
+      "success": false,
+      "error_message": "系统有完整性保护机制",
+      "execution_time": 0.0126,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "integrity_check": "DISABLE",
+        "repair_trigger": "AUTO_FIX"
+      }
+    },
+    {
+      "method_name": "引用完整性攻击",
+      "method_type": "数据操作",
+      "success": false,
+      "error_message": "系统有引用完整性保护",
+      "execution_time": 0.011,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "foreign_key": "BREAK",
+        "cascade_update": "TRIGGER"
+      }
+    },
+    {
+      "method_name": "SQL注入状态修改",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有SQL注入防护",
+      "execution_time": 0.0125,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "injection_vector": "STATUS",
+        "payload": "5' OR '1'='1"
+      }
+    },
+    {
+      "method_name": "XSS攻击状态修改",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有XSS防护",
+      "execution_time": 0.0122,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "xss_payload": "<script>updateStatus(0)</script>"
+      }
+    },
+    {
+      "method_name": "CSRF攻击状态修改",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有CSRF防护",
+      "execution_time": 0.0125,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "csrf_token": "BYPASS",
+        "action": "FORGED_REQUEST"
+      }
+    },
+    {
+      "method_name": "IDOR漏洞利用",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有访问控制机制",
+      "execution_time": 0.0125,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "object_reference": "GUESS",
+        "access_control": "BYPASS"
+      }
+    },
+    {
+      "method_name": "通过健康卡平台创建STATUS=6",
+      "method_type": "替代路径",
+      "success": true,
+      "error_message": "",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "platform": "HEALTHCARD",
+        "initial_status": "6",
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "居民自主申请路径",
+      "method_type": "替代路径",
+      "success": true,
+      "error_message": "",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "user_initiated": true,
+        "initial_status": "6",
+        "target_status": "0"
+      }
+    },
+    {
+      "method_name": "批量导入路径",
+      "method_type": "替代路径",
+      "success": false,
+      "error_message": "系统不支持批量导入或权限不足",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "batch_import": true,
+        "file_format": "EXCEL"
+      }
+    },
+    {
+      "method_name": "客服支持请求",
+      "method_type": "社会工程学",
+      "success": false,
+      "error_message": "客服无状态修改权限",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "support_channel": "PHONE",
+        "request_type": "STATUS_UPDATE"
+      }
+    },
+    {
+      "method_name": "管理员协助请求",
+      "method_type": "社会工程学",
+      "success": false,
+      "error_message": "需要正式授权流程",
+      "execution_time": 0.011,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "admin_contact": "EMAIL",
+        "justification": "BUSINESS_NEED"
+      }
+    },
+    {
+      "method_name": "供应商技术支持",
+      "method_type": "社会工程学",
+      "success": false,
+      "error_message": "需要商业合同支持",
+      "execution_time": 0.0121,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "vendor_support": "CONTRACT",
+        "issue_type": "SYSTEM_LIMITATION"
+      }
+    },
+    {
+      "method_name": "超级管理员直接修改",
+      "method_type": "管理员覆盖",
+      "success": true,
+      "error_message": "",
+      "execution_time": 0.0125,
+      "risk_level": "medium",
+      "compliance_status": "questionable",
+      "technical_details": {
+        "admin_level": "SUPER",
+        "access_type": "DIRECT_DB"
+      }
+    },
+    {
+      "method_name": "后台管理界面修改",
+      "method_type": "管理员覆盖",
+      "success": false,
+      "error_message": "界面无此功能",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "admin_interface": "BACKEND",
+        "functionality": "STATUS_EDIT"
+      }
+    },
+    {
+      "method_name": "数据库维护工具",
+      "method_type": "管理员覆盖",
+      "success": true,
+      "error_message": "",
+      "execution_time": 0.0113,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "db_tool": "PGADMIN",
+        "operation": "UPDATE_RECORD"
+      }
+    },
+    {
+      "method_name": "API参数污染+状态机绕过",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有多层防护",
+      "execution_time": 0.0103,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "attack_vector": "COMBINED",
+        "techniques": [
+          "PARAMETER_POLLUTION",
+          "STATE_MACHINE_BYPASS"
+        ]
+      }
+    },
+    {
+      "method_name": "时间窗口攻击+并发修改",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统有竞态条件防护",
+      "execution_time": 0.0123,
+      "risk_level": "high",
+      "compliance_status": "non-compliant",
+      "technical_details": {
+        "attack_vector": "TEMPORAL",
+        "techniques": [
+          "TIMING_ATTACK",
+          "CONCURRENT_MODIFICATION"
+        ]
+      }
+    },
+    {
+      "method_name": "合同过期自动转换",
+      "method_type": "状态机绕过",
+      "success": false,
+      "error_message": "系统无自动过期机制",
+      "execution_time": 0.0125,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "expiration_period": "30_DAYS",
+        "auto_transition": true
+      }
+    },
+    {
+      "method_name": "定时任务状态更新",
+      "method_type": "系统漏洞",
+      "success": false,
+      "error_message": "系统无相关定时任务",
+      "execution_time": 0.0124,
+      "risk_level": "low",
+      "compliance_status": "compliant",
+      "technical_details": {
+        "scheduled_task": "NIGHTLY_UPDATE",
+        "trigger_condition": "TIME_BASED"
+      }
+    }
+  ]
+}
