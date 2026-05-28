@@ -172,6 +172,8 @@ hiddenimports.extend([
     'Crypto.Hash',
     'Crypto.Util',
     'Crypto.Random',
+    'pandas',
+    'openpyxl',
     'requests',
     'tkinter',
     'json',

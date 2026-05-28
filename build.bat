@@ -15,7 +15,7 @@ if errorlevel 1 (
 
 echo.
 echo [2/3] 打包 EXE...
-pyinstaller --onefile --windowed --name "GulfSign" --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func --hidden-import cryptography --hidden-import Crypto --hidden-import Crypto.Cipher --hidden-import Crypto.PublicKey --hidden-import Crypto.Signature --hidden-import Crypto.Hash --hidden-import Crypto.Util --hidden-import Crypto.Random --add-data "hc_api.py;." --add-data "ph3_api.py;." --add-data "sign_engine.py;." --add-data "proxy_capture.py;." --add-data "license_client.py;." --add-data "config_manager.py;." --add-data "batch_processor.py;." app.py
+pyinstaller --onefile --windowed --name "GulfSign" --hidden-import gmssl --hidden-import gmssl.sm4 --hidden-import gmssl.sm3 --hidden-import gmssl.func --hidden-import cryptography --hidden-import Crypto --hidden-import Crypto.Cipher --hidden-import Crypto.PublicKey --hidden-import Crypto.Signature --hidden-import Crypto.Hash --hidden-import Crypto.Util --hidden-import Crypto.Random --hidden-import pandas --hidden-import openpyxl --add-data "hc_api.py;." --add-data "ph3_api.py;." --add-data "sign_engine.py;." --add-data "proxy_capture.py;." --add-data "license_client.py;." --add-data "config_manager.py;." --add-data "batch_processor.py;." app.py
 if errorlevel 1 (
     echo 打包失败！
     pause

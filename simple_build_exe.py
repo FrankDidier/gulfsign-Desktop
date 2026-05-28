@@ -39,6 +39,7 @@ def check_dependencies():
         "requests",
         "gmssl", 
         "cryptography",
+        "pandas",
         "PyInstaller"
     ]
     
@@ -76,6 +77,8 @@ def create_exe():
         "--hidden-import=Crypto.Hash",
         "--hidden-import=Crypto.Util",
         "--hidden-import=Crypto.Random",
+        "--hidden-import=pandas",
+        "--hidden-import=openpyxl",
         "--add-data=gulfsign_config.json:.",
         "--add-data=使用说明.txt:.",
         "--add-data=使用说明_最终版.txt:.",
