@@ -3737,21 +3737,76 @@ class GulfSignApp(tk.Tk):
         connection_success = False
         connection_error = ""
         
-        # 配置1: 标准HTTPS连接
+        # 配置1: 使用自定义SSL适配器（支持SSO重定向）
         try:
-            response = requests.get(base_url, timeout=10, verify=True)
+            import ssl
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.ssl_ import create_urllib3_context
+            
+            class CustomSSLAdapter(HTTPAdapter):
+                """自定义SSL适配器，支持较旧的TLS版本和SSO重定向"""
+                def init_poolmanager(self, *args, **kwargs):
+                    ctx = create_urllib3_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+                    kwargs['ssl_context'] = ctx
+                    return super().init_poolmanager(*args, **kwargs)
+            
+            session = requests.Session()
+            session.mount("https://", CustomSSLAdapter())
+            session.verify = False
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            
+            response = session.get(base_url, timeout=10, allow_redirects=True)
+            
             if response.status_code == 200:
-                if "ggws" in response.text.lower() or "公卫" in response.text:
-                    diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (标准HTTPS)"))
+                # 检查是否成功访问系统
+                if "ggws" in response.text.lower() or "公卫" in response.text or "Token" in response.url:
+                    diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (支持SSO重定向)"))
                     connection_success = True
+                    
+                    # 检查是否有Token（SSO认证成功）
+                    if "Token" in response.url:
+                        diagnostics.append(("SSO认证", True, "检测到认证Token"))
+                    else:
+                        diagnostics.append(("SSO认证", False, "未检测到认证Token，可能需要登录"))
                 else:
                     diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
             else:
                 diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+                
+            # 检查重定向链
+            if response.history:
+                redirect_count = len(response.history)
+                diagnostics.append(("重定向处理", True, f"处理了 {redirect_count} 次重定向"))
+                
+                # 检查是否重定向到SSO服务器
+                sso_redirect = any("sso.hnhfpc.gov.cn" in resp.url for resp in response.history)
+                if sso_redirect:
+                    diagnostics.append(("SSO重定向", True, "检测到SSO认证流程"))
+                    
         except Exception as e:
-            connection_error = f"标准HTTPS失败: {str(e)}"
+            connection_error = f"自定义SSL适配器失败: {str(e)}"
         
-        # 配置2: 跳过证书验证
+        # 配置2: 标准HTTPS连接（备用）
+        if not connection_success:
+            try:
+                response = requests.get(base_url, timeout=10, verify=True)
+                if response.status_code == 200:
+                    if "ggws" in response.text.lower() or "公卫" in response.text:
+                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (标准HTTPS)"))
+                        connection_success = True
+                    else:
+                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+            except Exception as e:
+                connection_error = f"标准HTTPS失败: {str(e)}"
+        
+        # 配置3: 跳过证书验证（备用）
         if not connection_success:
             try:
                 response = requests.get(base_url, timeout=10, verify=False)
@@ -3766,53 +3821,45 @@ class GulfSignApp(tk.Tk):
             except Exception as e:
                 connection_error = f"跳过证书验证失败: {str(e)}"
         
-        # 配置3: 使用较旧的SSL/TLS版本
-        if not connection_success:
-            try:
-                import ssl
-                import urllib3
-                
-                # 创建自定义SSL上下文，支持较旧的协议
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-                ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')  # 降低安全级别以支持较旧的加密套件
-                
-                # 尝试使用urllib3
-                http = urllib3.PoolManager(
-                    ssl_context=ssl_context,
-                    retries=urllib3.Retry(total=3, backoff_factor=0.5),
-                    timeout=urllib3.Timeout(connect=5.0, read=10.0)
-                )
-                
-                response = http.request('GET', base_url)
-                if response.status == 200:
-                    response_text = response.data.decode('utf-8', errors='ignore')
-                    if "ggws" in response_text.lower() or "公卫" in response_text:
-                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (兼容SSL/TLS)"))
-                        connection_success = True
-                    else:
-                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
-                else:
-                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status}"))
-            except Exception as e:
-                connection_error = f"兼容SSL/TLS失败: {str(e)}"
-        
         # 如果所有配置都失败
         if not connection_success:
             diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
         
         # 3. 检查配置
         missing = []
-        if not self._cfg.get("username"):
+        
+        # 检查账号
+        account = self._cfg.get("username")
+        if not account:
             missing.append("账号")
-        if not self._cfg.get("ggws_base_url"):
+        
+        # 检查系统地址
+        base_url = self._cfg.get("ggws_base_url")
+        if not base_url:
             missing.append("3.0系统地址")
-        # org_code 不是必需字段，用户登录后可以从系统获取
+        
+        # 检查密码（如果账号存在但密码为空）
+        password = self._cfg.get("password")
+        if account and not password:
+            # 密码可以为空，但需要提示用户
+            diagnostics.append(("密码配置", False, "密码为空，请确保已输入密码"))
+        
+        # 检查机构代码（如果已登录但机构代码为空）
+        org_code = self._cfg.get("org_code")
+        if hasattr(self.client, 'logged_in') and self.client.logged_in and not org_code:
+            # 尝试从客户端获取机构代码
+            if hasattr(self.client, 'org_code') and self.client.org_code:
+                self._cfg["org_code"] = self.client.org_code
+                self._save_current_config()
+                org_code = self.client.org_code
+            
+            if not org_code:
+                diagnostics.append(("机构信息", False, "机构代码未提取，请尝试同步配置"))
         
         if missing:
             diagnostics.append(("配置完整性", False, f"缺失: {', '.join(missing)}"))
         else:
+            # 如果有警告信息但主要配置完整，仍然显示配置完整
             diagnostics.append(("配置完整性", True, "配置完整"))
         
         # 4. 检查登录状态
@@ -3858,8 +3905,8 @@ class GulfSignApp(tk.Tk):
             self.enhanced_sync_btn.configure(state=tk.NORMAL)
         else:
             self.enhanced_status_var.set("诊断完成: 发现一些问题")
-            self.enhanced_connection_var.set("连接异常")
-            self.enhanced_connection_label.configure(foreground="red")
+            self.enhanced_connection_status_var.set("连接异常")
+            self.enhanced_connection_status_label.configure(foreground="red")
     
     def _perform_detailed_diagnosis(self) -> List[Tuple[str, bool, str, str]]:
         """执行详细诊断"""
@@ -4012,13 +4059,13 @@ class GulfSignApp(tk.Tk):
         
         if all_passed:
             self.enhanced_status_var.set("详细诊断完成: 所有测试通过")
-            self.enhanced_connection_var.set("已连接")
-            self.enhanced_connection_label.configure(foreground="green")
+            self.enhanced_connection_status_var.set("已连接")
+            self.enhanced_connection_status_label.configure(foreground="green")
             self.enhanced_sync_btn.configure(state=tk.NORMAL)
         else:
             self.enhanced_status_var.set("详细诊断完成: 发现问题")
-            self.enhanced_connection_var.set("连接异常")
-            self.enhanced_connection_label.configure(foreground="red")
+            self.enhanced_connection_status_var.set("连接异常")
+            self.enhanced_connection_status_label.configure(foreground="red")
             
             # 提供修复建议
             self.enhanced_diag_text.configure(state=tk.NORMAL)

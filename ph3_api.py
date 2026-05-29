@@ -241,27 +241,93 @@ class PH3Client:
         return result
 
     def _extract_tokens(self, html: str) -> bool:
-        en_m = re.search(r"""en\s*:\s*['"]([A-Fa-f0-9]{32})['"]""", html)
-        th_m = re.search(r"""th\s*:\s*['"]([A-Fa-f0-9]{64})['"]""", html)
-        if en_m:
-            self.token_en = en_m.group(1)
-        if th_m:
-            self.token_th = th_m.group(1)
+        # 尝试多种en token模式
+        en_patterns = [
+            r"""en\s*:\s*['"]([A-Fa-f0-9]{32})['"]""",
+            r"""en\s*=\s*['"]([A-Fa-f0-9]{32})['"]""",
+            r"""var\s+en\s*=\s*['"]([A-Fa-f0-9]{32})['"]""",
+            r"""crptosEn\s*:\s*['"]([A-Fa-f0-9]{32})['"]""",
+            r"""crptosEn\s*=\s*['"]([A-Fa-f0-9]{32})['"]""",
+        ]
+        
+        for pattern in en_patterns:
+            en_m = re.search(pattern, html)
+            if en_m:
+                self.token_en = en_m.group(1)
+                break
+        
+        # 尝试多种th token模式
+        th_patterns = [
+            r"""th\s*:\s*['"]([A-Fa-f0-9]{64})['"]""",
+            r"""th\s*=\s*['"]([A-Fa-f0-9]{64})['"]""",
+            r"""var\s+th\s*=\s*['"]([A-Fa-f0-9]{64})['"]""",
+            r"""crptosTH\s*:\s*['"]([A-Fa-f0-9]{64})['"]""",
+            r"""crptosTH\s*=\s*['"]([A-Fa-f0-9]{64})['"]""",
+        ]
+        
+        for pattern in th_patterns:
+            th_m = re.search(pattern, html)
+            if th_m:
+                self.token_th = th_m.group(1)
+                break
+        
         return bool(self.token_en and self.token_th)
 
     def _extract_user_info(self, html: str):
-        org_m = re.search(
-            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{15,})['"]""", html
-        )
-        if org_m:
-            self.org_code = org_m.group(1)
-
-        name_m = re.search(
+        # 尝试多种机构代码模式
+        org_patterns = [
+            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{15,})['"]""",
+            r"""orgCode\s*:\s*['"](\d{15,})['"]""",
+            r"""orgCode\s*=\s*['"](\d{15,})['"]""",
+            r"""orgcode\s*:\s*['"](\d{15,})['"]""",
+            r"""orgcode\s*=\s*['"](\d{15,})['"]""",
+            r"""ORGCODE\s*:\s*['"](\d{15,})['"]""",
+            r"""ORGCODE\s*=\s*['"](\d{15,})['"]""",
+            r"""var\s+orgCode\s*=\s*['"](\d{15,})['"]""",
+            r"""var\s+ORGCODE\s*=\s*['"](\d{15,})['"]""",
+        ]
+        
+        for pattern in org_patterns:
+            org_m = re.search(pattern, html, re.IGNORECASE)
+            if org_m:
+                self.org_code = org_m.group(1)
+                break
+        
+        # 尝试多种医生姓名模式
+        name_patterns = [
             r"""(?:UserName|XINGMING|xm)\s*[=:]\s*['"]([^'"]+)['"]""",
-            html, re.IGNORECASE,
-        )
-        if name_m:
-            self.doctor_name = name_m.group(1).strip()
+            r"""userName\s*:\s*['"]([^'"]+)['"]""",
+            r"""userName\s*=\s*['"]([^'"]+)['"]""",
+            r"""XINGMING\s*:\s*['"]([^'"]+)['"]""",
+            r"""XINGMING\s*=\s*['"]([^'"]+)['"]""",
+            r"""xm\s*:\s*['"]([^'"]+)['"]""",
+            r"""xm\s*=\s*['"]([^'"]+)['"]""",
+            r"""var\s+userName\s*=\s*['"]([^'"]+)['"]""",
+            r"""var\s+XINGMING\s*=\s*['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in name_patterns:
+            name_m = re.search(pattern, html, re.IGNORECASE)
+            if name_m:
+                self.doctor_name = name_m.group(1).strip()
+                break
+        
+        # 尝试提取团队信息
+        team_patterns = [
+            r"""(?:TEAMNAME|teamname|TeamName)\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""teamName\s*:\s*['"]([^'"]+)['"]""",
+            r"""teamName\s*=\s*['"]([^'"]+)['"]""",
+            r"""TEAMNAME\s*:\s*['"]([^'"]+)['"]""",
+            r"""TEAMNAME\s*=\s*['"]([^'"]+)['"]""",
+            r"""var\s+teamName\s*=\s*['"]([^'"]+)['"]""",
+            r"""var\s+TEAMNAME\s*=\s*['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in team_patterns:
+            team_m = re.search(pattern, html, re.IGNORECASE)
+            if team_m:
+                self.team_name = team_m.group(1).strip()
+                break
 
     # ---- 登录 ----
 
@@ -280,10 +346,33 @@ class PH3Client:
         })
 
         try:
+            # 首先尝试直接访问FormMain.aspx（处理SSO重定向）
             page = self.session.get(
                 self._url("/FormMain.aspx"), timeout=self._timeout
             )
-
+            
+            # 检查是否被重定向到SSO服务器
+            if "sso.hnhfpc.gov.cn" in page.url:
+                logger.info(f"检测到SSO重定向: {page.url}")
+                
+                # 尝试从重定向URL中提取Token
+                import urllib.parse as urlparse
+                parsed = urlparse.urlparse(page.url)
+                query_params = urlparse.parse_qs(parsed.query)
+                
+                if 'Token' in query_params:
+                    token = query_params['Token'][0]
+                    logger.info(f"从重定向URL提取Token: {token}")
+                    
+                    # 使用Token访问主页面（这会显示登录表单）
+                    main_url = self._url(f"/Index.aspx?Token={token}")
+                    page = self.session.get(main_url, timeout=self._timeout)
+                    logger.info(f"访问登录页面成功: {page.url}")
+                else:
+                    # 没有找到Token，尝试传统的登录方式
+                    logger.info("未找到Token，尝试传统登录方式")
+            
+            # 传统登录方式（原有的逻辑）
             if not self._extract_tokens(page.text):
                 return False, "无法获取加密Token（页面加载失败）"
 

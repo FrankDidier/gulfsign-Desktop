@@ -1,0 +1,315 @@
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>湖南省基层卫生信息系统-公卫3.0（221）</title>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1,IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="css/index2.css?v=1.3" rel="stylesheet" type="text/css" />
+    <script src="js/jquery/Base.js" type="text/javascript"></script>
+    <script src="js/appcommon.js?v=20241128" type="text/javascript"></script>
+    
+    <link rel="stylesheet" type="text/css" href="js/codebase/dhtmlx.css" />
+    <script type="text/javascript" language="javascript" src="js/codebase/dhtmlx.js?v=1.0"></script>
+    <!--[if lte IE 9]>
+        <script type="text/javascript">
+            window.location.href = 'http://175.6.102.120:8113/update.html';
+        </script>
+   <![endif]-->
+    <script type="text/javascript">
+        if (window != top)
+            top.location.href = "Index.aspx";
+
+        var token_en_th = { en: "A14E808731C345E8A7E88654A892FC8B",
+                        th: "2D89A8D7C196435ABBA8A9CAECBBD6D69DB4BB553EE3474CA7121FD3089E5010" };
+        function submitForm(yhm, casn) {
+            var yonghumi = $("#YONGHUMING").val() || '';
+            var mima = $("#MIMA").val() || '';
+            var yanzhengma = '';
+            var type = "1";
+            if (yhm) {
+                type = "2";
+                yonghumi = yhm;
+                mima = casn;
+            }
+
+            if (yonghumi == "") {
+                errShow("帐号不能为空。");
+                $("#YONGHUMING").focus();
+                return;
+            }
+
+            if (mima.length == "") {
+                errShow("密码不能为空。");
+                $("#MIMA").focus();
+                return;
+            }
+            
+            var path = "ashx/LoginHandler.ashx?action=LOGIN";
+            path += "&YONGHUMING=" + encodeURIComponent(yonghumi) + "&" + openUrlHandle("MIMA", mima) + "&YANZHENGMA=" + yanzhengma + "&TYPE=" + type;
+            errHide();
+            $.ajax({
+                type: "POST",
+                url: path,
+                dataType: "json",
+                success: function (obj) {
+                    switch (parseInt(obj.opType)) {
+                        case 0:
+                            
+                            if ("1" == "1" && obj.msg <= 5) {
+
+                                qrshow();
+                            } else {
+                                SetCookie("username_yljgxm", yonghumi);
+                                location.href = "https://ggws.hnhfpc.gov.cn/FormMain.aspx";
+                            }
+                            break;
+             
+                        case 5:
+                            alert(obj.msg);
+                            document.location.href = obj.type;
+                            break;
+                        default:
+                            errShow(obj.msg);
+                            $("#MIMA").val("");
+                            $("#YANZHENGMA").val("");
+                            $("#MIMA").focus();
+                            break;
+                    }
+                }
+            });
+        }
+        var dhxWins;
+        var qrshow = function () {
+            dhxWins = new dhtmlXWindows();
+            var window_sendsms = dhxWins.createWindow('w_qrcode', 0, 0, 650, 550);
+            window_sendsms.centerOnScreen();
+            window_sendsms.button("close").hide();
+            window_sendsms.setText("扫码验证");
+            window_sendsms.setModal(true);
+            window_sendsms.attachURL("Pg_ScanQrCode.aspx?href=" + "https://ggws.hnhfpc.gov.cn/FormMain.aspx" + "&etc=" + new Date().getTime());
+        }
+        var smsshow = function () {
+            dhxWins.window("w_qrcode").close();
+            var window_sendsms = dhxWins.createWindow('w_sendsms', 0, 0, 450, 200);
+            window_sendsms.centerOnScreen();
+            window_sendsms.button("close").hide();
+            window_sendsms.setText("短信验证码");
+            window_sendsms.setModal(true);
+            window_sendsms.attachURL("Pg_SendSMS.aspx?href=" + "https://ggws.hnhfpc.gov.cn/FormMain.aspx" + "&etc=" + new Date().getTime());
+        }
+
+        document.onkeydown = function (e) {
+            if (!e) e = window.event; //火狐中是 window.event
+            if ((e.keyCode || e.which) == 13) {
+                submitForm();
+            }
+        }
+        window.onload = function () {
+            var user_name = getCookie("username_yljgxm");
+            if (user_name != null) {
+                $("#YONGHUMING").val(user_name);
+                $("#MIMA").focus();
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="g-doc">
+        <div class="m-hd">
+            <div class="m-bd">
+                <a class="j_logo_pos" href="">湖南省基层卫生信息系统-公卫3.0</a>
+            </div>
+        </div>
+        <div class="m-main">
+            <div class="m-bd">
+                <div class="u-sloga">
+                    <img src="images/banner.gif" />
+                </div>
+                <!--登录框-->
+                <div class="m-login">
+                    <div id="panel-input">
+                        <div style="overflow: hidden;">
+                            <div class="m-lgn-top">
+                                用户登录</div>
+                            <div class="middle">
+                                <img src="images/aq_03.png" /></div>
+                            <div class="right" id="qrcode" style="position: relative;">
+                                <img src="images/ewm_03.png" /></div>
+                        </div>
+                        <div class="m-fmLogin">
+                            <div class="m-error">
+                                <img class="icon" src="images/error.png">
+                                <span id="errmsg"></span>
+                            </div>
+                            <div class="m-ipt">
+                                <img class="icon" src="images/User.png">
+                                <input id="YONGHUMING" type="text" name="YONGHUMING" placeholder="请输入帐号" />
+                                
+                            </div>
+                            <div class="m-ipt">
+                                <img class="icon" src="images/password.png">
+                                <input id="MIMA" type="password" name="MIMA" placeholder="请输入密码" />
+                                
+                            </div>
+                            <div class="m-rpsd f-cb">
+                                <div class="u-lgn-check" loginstatus="1">
+                                </div>
+                                <span></span><a class="forgetPra"></a>
+                            </div>
+                            <input id="formSave" class="u-lgn-btn j-login" onclick="javascript: submitForm('', '');"
+                                type="button" value="登录" />
+                        </div>
+                        <div class="m-gTest">
+                            <span></span><a class="forgetPra" href="https://sso.hnhfpc.gov.cn:8077/security/LossPassWord.aspx">
+                                忘记密码</a>
+                        </div>
+                    </div>
+                    <div id="panel-qrcode" style="display: none">
+                        <div class="middle2">
+                            <img src="images/0_06.jpg" /></div>
+                        <div class="right2" id="screen">
+                            <img src="images/0_03.jpg" /></div>
+                        <div class="m-lgn-top2">
+                            手机扫码，安全登录</div>
+                        <div class="m-fmLogin2">
+                            <div class="cover">
+                                <div class="txt">
+                                    二维码已失效
+                                </div>
+                                <div class="btn">
+                                    刷新二维码</div>
+                            </div>
+                            <img id="qrcode_img" src="" style="width: 130px; height: 130px;" /></div>
+                        <div class="ss">
+                            <img src="images/ss.png" />
+                            打开全员业务办理小程序扫码认证</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="m-ft">
+            <p>
+                <span>主办单位：湖南省卫生健康委员会 </span><span></span>
+            </p>
+            <p>
+                版本：3.0 更新时间：2021年5月14日
+            </p>
+        </div>
+    </div>
+    <script type="text/javascript" language="javascript" src="js/jquery/jquery.js"></script>
+    <script type="text/javascript" language="javascript" src="js/jquery/jquery.LoadImage.js"></script>
+    <script language="javascript" type="text/javascript">
+        var iquery;
+        var token = "";
+        $(function () {
+            $(".u-sloga img").LoadImage("images/banner_lazyload.png");
+
+            /*==========登录方式的切换=============*/
+            function generate() {
+                $.ajax({
+                    type: "POST",
+                    url: "ashx/LoginHandler.ashx?ACTION=GENERATE",
+                    dataType: "json",
+                    success: function (r) {
+                        console.log(r)
+                        switch (r.code) {
+                            case 0:
+                                $("#qrcode_img").attr("src", r.data.tokenimage);
+                                token = r.data.catoken;
+                                break;
+                        }
+                    }
+                });
+            }
+
+            $('.cover .btn').click(function () {
+                errQrCodeHide();
+                generate();
+                iquery = setInterval(query, 2000);
+            })
+
+            function query() {
+                $.ajax({
+                    type: "POST",
+                    url: "ashx/LoginHandler.ashx?ACTION=QUERY&token=" + token,
+                    dataType: "json",
+                    success: function (r) {
+                        switch (r.code) {
+                            case 0:
+                                location.href = "https://ggws.hnhfpc.gov.cn/FormMain.aspx";
+                                break;
+                            case 1:
+                                errQrCodeShow(r.message);
+                                break;
+                            case 2:
+                                break;
+                            case 3:
+                                errQrCodeShow(r.message);
+                                break;
+                            case 4:
+                                errQrCodeShow(r.message);
+                                break;
+                        }
+                    }
+                });
+            }
+
+            $('#screen').on('click', function () {
+                document.getElementById("panel-qrcode").style.display = "none";
+                document.getElementById("panel-input").style.display = "block";
+                if (iquery != null || typeof iquery != "undefined") {
+                    clearInterval(iquery);
+                }
+            });
+            $('#qrcode').on('click', function () {
+                document.getElementById("panel-input").style.display = "none";
+                document.getElementById("panel-qrcode").style.display = "block";
+                $('.cover').hide()
+                generate();
+                iquery = setInterval(query, 2000);
+            });
+
+        });
+
+        // 错误显示
+        function errShow(msg) {
+            $('#errmsg').text(msg)
+            $('.m-error').show()
+        }
+        // 错误隐藏
+        function errHide() {
+            $('.m-error').hide()
+        }
+
+        function errQrCodeShow(msg) {
+            $('.txt').text(msg);
+            $('.cover').show();
+            if (iquery != null || typeof iquery != "undefined") {
+                clearInterval(iquery);
+            }
+        }
+        function errQrCodeHide() {
+            $('.cover').hide();
+        }
+
+    </script>
+    <script language="javascript" type="text/javascript">
+        $(document).ready(function () {
+            var b_name = navigator.appName;
+            var b_version = navigator.appVersion;
+            var version = b_version.split(";");
+            var trim_version = version.length > 1 ? version[1].replace(/[ ]/g, "") : version[0].replace(/[ ]/g, "");
+            if (b_name == "Microsoft Internet Explorer") {
+                /*如果是IE6或者IE7*/
+                if (trim_version == "MSIE7.0" || trim_version == "MSIE6.0") {
+                    alert("IE浏览器版本过低，禁止登陆。请更新IE浏览器或使用其他浏览器");
+                    //然后跳到需要连接的下载网站
+                    window.location.href = "https://support.microsoft.com/zh-cn/help/17621/internet-explorer-downloads";
+                }
+            }
+        });
+    </script>
+</body>
+</html>

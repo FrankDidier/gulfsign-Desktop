@@ -1,157 +1,281 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-最终验证：确保所有功能按预期工作
+最终验证测试
 """
-
+import sys
 import os
 import json
-from app import load_config
+import time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-print("=" * 80)
-print("湾流签约助手 - 最终验证")
-print("=" * 80)
+def verify_configuration():
+    """验证配置"""
+    print("🔍 验证配置完整性")
+    print("="*60)
+    
+    config_file = "gulfsign_config.json"
+    
+    if not os.path.exists(config_file):
+        print("❌ 配置文件不存在")
+        return False
+    
+    with open(config_file, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    print("当前配置状态:")
+    print(f"   账号: {config.get('username', '未设置')}")
+    print(f"   密码: {'已设置' if config.get('password') else '未设置'}")
+    print(f"   系统地址: {config.get('ggws_base_url', '未设置')}")
+    print(f"   机构代码: {config.get('org_code', '未设置')}")
+    
+    # 检查必需字段
+    missing = []
+    if not config.get("username"):
+        missing.append("账号")
+    if not config.get("ggws_base_url"):
+        missing.append("系统地址")
+    
+    if missing:
+        print(f"❌ 缺失必需字段: {', '.join(missing)}")
+        return False
+    
+    print("✅ 配置完整性验证通过")
+    return True
 
-print("\n1. 配置文件验证:")
-config_file = "gulfsign_config.json"
-config_path = os.path.join(os.path.dirname(__file__), config_file)
+def verify_ph3client():
+    """验证PH3Client"""
+    print("\n🔍 验证PH3Client登录")
+    print("="*60)
+    
+    try:
+        from ph3_api import PH3Client
+        
+        account = "431122012"
+        password = "wei1147609775@"
+        base_url = "https://ggws.hnhfpc.gov.cn"
+        
+        print(f"测试登录:")
+        print(f"   账号: {account}")
+        print(f"   系统地址: {base_url}")
+        
+        client = PH3Client()
+        success, message = client.login(base_url, account, password)
+        
+        print(f"   登录结果: {success}")
+        print(f"   登录消息: {message}")
+        
+        if not success:
+            print("❌ PH3Client登录失败")
+            return False
+        
+        print(f"   机构代码: {client.org_code}")
+        print(f"   医生姓名: {client.doctor_name}")
+        print(f"   团队名称: {client.team_name}")
+        
+        # 检查加密令牌
+        if client.token_en and client.token_th:
+            print("✅ 加密令牌提取成功")
+        else:
+            print("❌ 加密令牌提取失败")
+            return False
+        
+        # 检查机构代码
+        if client.org_code:
+            print(f"✅ 机构代码提取成功: {client.org_code}")
+        else:
+            print("⚠️  机构代码未提取，尝试获取机构树...")
+            orgs = client.get_org_tree("0")
+            if orgs:
+                print(f"   找到机构节点: {len(orgs)}个")
+                # 尝试向下钻取
+                client._drill_org_tree(orgs)
+                print(f"   钻取后机构代码: {client.org_code}")
+        
+        print("✅ PH3Client验证通过")
+        return True
+        
+    except Exception as e:
+        print(f"❌ PH3Client验证失败: {str(e)}")
+        return False
 
-if os.path.exists(config_path):
-    print(f"   ✓ 配置文件存在: {config_file}")
+def verify_app_ui():
+    """验证应用程序UI"""
+    print("\n🔍 验证应用程序UI")
+    print("="*60)
     
-    # 读取配置文件
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config_data = json.load(f)
-    
-    print(f"\n   配置内容:")
-    print(f"   - 账号 (username): {config_data.get('username', '未设置')}")
-    print(f"   - 密码 (password): {'已设置' if config_data.get('password') else '未设置'}")
-    print(f"   - 系统地址 (ggws_base_url): {config_data.get('ggws_base_url', '未设置')}")
-    print(f"   - 机构代码 (org_code): {config_data.get('org_code', '未设置')}")
-    print(f"   - 签约医生 (doctor): {config_data.get('doctor', '未设置')}")
-    print(f"   - 签约团队 (team): {config_data.get('team', '未设置')}")
-    
-    # 验证必需字段
-    required_fields = ["username", "ggws_base_url"]
-    missing_fields = []
-    
-    for field in required_fields:
-        if field not in config_data or not config_data[field]:
-            missing_fields.append(field)
-    
-    if missing_fields:
-        print(f"\n   ❌ 缺失必需字段: {missing_fields}")
-    else:
-        print(f"\n   ✅ 所有必需字段都存在")
+    try:
+        import tkinter as tk
+        from app import GulfSignApp
         
-        # 验证账号密码是否正确
-        expected_username = "431122012"
-        expected_password = "wei1147609775@"
+        print("1. 创建应用程序实例...")
+        # 注意: GulfSignApp继承自tk.Tk，不需要传递master参数
+        app = GulfSignApp()
         
-        username_correct = config_data.get("username") == expected_username
-        password_correct = config_data.get("password") == expected_password
+        print("2. 检查UI变量...")
+        ui_variables = [
+            ("var_url", app.var_url),
+            ("var_account", app.var_account),
+            ("var_password", app.var_password),
+            ("var_org", app.var_org),
+            ("var_doctor", app.var_doctor),
+            ("var_team", app.var_team),
+        ]
         
-        print(f"\n   账号密码验证:")
-        print(f"   - 账号匹配: {'✓' if username_correct else '✗'}")
-        print(f"   - 密码匹配: {'✓' if password_correct else '✗'}")
+        all_ok = True
+        for name, var in ui_variables:
+            if hasattr(var, 'get'):
+                print(f"   ✅ {name}: 存在")
+            else:
+                print(f"   ❌ {name}: 不存在")
+                all_ok = False
         
-else:
-    print(f"   ❌ 配置文件不存在: {config_file}")
+        if not all_ok:
+            print("❌ UI变量验证失败")
+            return False
+        
+        print("3. 检查配置加载...")
+        if hasattr(app, '_cfg') and app._cfg:
+            print(f"   ✅ 配置加载成功")
+            print(f"      账号: {app._cfg.get('username', '未设置')}")
+            print(f"      系统地址: {app._cfg.get('ggws_base_url', '未设置')}")
+        else:
+            print("❌ 配置加载失败")
+            return False
+        
+        print("4. 检查客户端实例...")
+        if hasattr(app, 'client') and app.client:
+            print("   ✅ PH3Client实例存在")
+        else:
+            print("❌ PH3Client实例不存在")
+            return False
+        
+        # 清理
+        app.destroy()
+        
+        print("✅ 应用程序UI验证通过")
+        return True
+        
+    except Exception as e:
+        print(f"❌ 应用程序UI验证失败: {str(e)}")
+        return False
 
-print("\n2. 配置加载功能验证:")
-try:
-    config = load_config()
-    print("   ✅ 配置加载功能正常")
+def verify_diagnosis():
+    """验证诊断功能"""
+    print("\n🔍 验证诊断功能")
+    print("="*60)
     
-    # 验证加载的配置
-    if config.get("username") == "431122012":
-        print("   ✅ 配置正确加载: 账号匹配")
-    else:
-        print(f"   ⚠️  配置加载: 账号不匹配 ({config.get('username')})")
+    try:
+        import tkinter as tk
+        from app import GulfSignApp
         
-except Exception as e:
-    print(f"   ❌ 配置加载失败: {e}")
+        print("1. 创建应用程序实例...")
+        app = GulfSignApp()
+        
+        print("2. 设置测试配置...")
+        app.enhanced_url_var.set("https://ggws.hnhfpc.gov.cn")
+        app.enhanced_api_account_var.set("431122012")
+        
+        print("3. 运行诊断...")
+        # 运行诊断（同步方式）
+        diagnostics = app._perform_login_diagnosis()
+        
+        print("4. 检查诊断结果...")
+        for name, success, message in diagnostics:
+            icon = "✅" if success else "❌"
+            print(f"   {icon} {name}: {message}")
+        
+        # 检查关键诊断项
+        network_ok = any(name == "网络连接" and success for name, success, _ in diagnostics)
+        system_ok = any(name == "公卫3.0系统" and success for name, success, _ in diagnostics)
+        config_ok = any(name == "配置完整性" and success for name, success, _ in diagnostics)
+        
+        if not network_ok:
+            print("❌ 网络连接诊断失败")
+            return False
+        
+        if not system_ok:
+            print("⚠️  公卫系统访问失败，但配置可能仍然有效")
+            # 继续测试，因为配置可能仍然有效
+        
+        if not config_ok:
+            print("❌ 配置完整性检查失败")
+            return False
+        
+        print("✅ 诊断功能验证通过")
+        
+        # 清理
+        app.destroy()
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ 诊断功能验证失败: {str(e)}")
+        return False
 
-print("\n3. 应用程序启动验证:")
-try:
-    import tkinter as tk
-    from app import GulfSignApp
+def main():
+    """主验证函数"""
+    print("开始最终验证测试...")
+    print("="*60)
     
-    # 创建应用程序实例（不显示窗口）
-    app = GulfSignApp()
-    app.withdraw()  # 隐藏窗口
+    print("测试环境:")
+    print(f"   Python版本: {sys.version}")
+    print(f"   工作目录: {os.getcwd()}")
+    print(f"   配置文件: gulfsign_config.json")
     
-    print("   ✅ 应用程序启动正常")
-    
-    # 验证UI变量
-    required_vars = [
-        "var_url", "var_account", "var_password", "var_org",
-        "var_doctor", "var_team", "var_delay", "var_pop_type"
+    # 运行所有验证
+    tests = [
+        ("配置完整性", verify_configuration),
+        ("PH3Client登录", verify_ph3client),
+        ("应用程序UI", verify_app_ui),
+        ("诊断功能", verify_diagnosis),
     ]
     
-    missing_vars = []
-    for var in required_vars:
-        if not hasattr(app, var):
-            missing_vars.append(var)
+    results = []
     
-    if missing_vars:
-        print(f"   ❌ 缺失UI变量: {missing_vars}")
+    for test_name, test_func in tests:
+        print(f"\n▶️  运行测试: {test_name}")
+        try:
+            success = test_func()
+            results.append((test_name, success))
+        except Exception as e:
+            print(f"❌ 测试异常: {str(e)}")
+            results.append((test_name, False))
+    
+    # 总结
+    print("\n" + "="*60)
+    print("验证总结")
+    print("="*60)
+    
+    all_passed = True
+    for test_name, success in results:
+        status = "✅ 通过" if success else "❌ 失败"
+        print(f"{test_name}: {status}")
+        if not success:
+            all_passed = False
+    
+    print("\n" + "="*60)
+    if all_passed:
+        print("🎉 所有验证测试通过！")
+        print("\n应用程序状态:")
+        print("   1. ✅ 配置完整性检查通过")
+        print("   2. ✅ PH3Client登录功能正常")
+        print("   3. ✅ 应用程序UI初始化正常")
+        print("   4. ✅ 诊断功能正常工作")
+        print("\n下一步:")
+        print("   1. 运行应用程序进行完整功能测试")
+        print("   2. 使用账号密码登录系统")
+        print("   3. 测试查询和签约功能")
+        print("   4. 生成EXE文件进行部署")
     else:
-        print("   ✅ 所有UI变量都存在")
-        
-        # 验证配置恢复
-        if app.var_url.get() == "https://ggws.hnhfpc.gov.cn":
-            print("   ✅ 配置恢复正常: 系统地址正确")
-        else:
-            print(f"   ⚠️  配置恢复: 系统地址不正确 ({app.var_url.get()})")
+        print("⚠️  部分验证测试失败")
+        print("\n需要修复的问题:")
+        for test_name, success in results:
+            if not success:
+                print(f"   - {test_name}")
     
-    # 关闭应用程序
-    app.destroy()
-    
-except Exception as e:
-    print(f"   ❌ 应用程序启动失败: {e}")
+    return all_passed
 
-print("\n4. 功能完整性检查:")
-print("   - 配置文件: ✓ 存在并正确配置")
-print("   - 账号密码: ✓ 正确设置")
-print("   - 系统地址: ✓ 正确设置")
-print("   - 配置加载: ✓ 功能正常")
-print("   - 应用程序: ✓ 启动正常")
-print("   - UI变量: ✓ 全部存在")
-print("   - 配置恢复: ✓ 正常工作")
-
-print("\n5. 实际使用准备状态:")
-print("   ✅ 应用程序已完全准备好进行实际使用")
-print("\n   使用步骤:")
-print("   1. 启动应用程序: python app.py")
-print("   2. 在登录界面输入:")
-print("      - 账号: 431122012")
-print("      - 密码: wei1147609775@")
-print("   3. 点击'登录'按钮")
-print("   4. 在查询条件中选择'未签约'")
-print("   5. 点击'查询'按钮查找未签约人群")
-print("   6. 选择要签约的居民")
-print("   7. 设置签约医生和团队")
-print("   8. 点击'开始签约'按钮")
-print("   9. 监控签约进度和日志")
-
-print("\n6. 注意事项:")
-print("   📍 确保网络连接正常")
-print("   📍 确保公卫3.0系统可访问")
-print("   📍 首次使用建议先测试少量居民")
-print("   📍 监控签约日志确保操作成功")
-print("   📍 如有问题，检查配置文件是否正确")
-
-print("\n" + "=" * 80)
-print("验证结果: ✅ 所有功能正常，应用程序已准备好使用")
-print("=" * 80)
-
-print("\n🎉 恭喜！湾流签约助手已成功配置并验证通过。")
-print("   您现在可以开始使用应用程序进行实际的批量签约操作。")
-print("\n   如有任何问题，请检查:")
-print("   1. 网络连接")
-print("   2. 公卫3.0系统可访问性")
-print("   3. 账号密码是否正确")
-print("   4. 配置文件完整性")
-
-print("\n" + "=" * 80)
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)

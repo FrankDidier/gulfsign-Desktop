@@ -2,321 +2,250 @@
 # -*- coding: utf-8 -*-
 """
 综合测试修复
-验证所有配置修复是否正常工作
 """
-
-import os
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ph3_api import PH3Client
 import json
-import tempfile
-from pathlib import Path
 
-# 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+def test_ph3client_login():
+    """测试PH3Client登录"""
+    print("🔍 测试PH3Client登录和用户信息提取")
+    print("="*60)
+    
+    account = "431122012"
+    password = "wei1147609775@"
+    base_url = "https://ggws.hnhfpc.gov.cn"
+    
+    print(f"账号: {account}")
+    print(f"密码: {password}")
+    print(f"系统地址: {base_url}")
+    
+    # 创建客户端
+    client = PH3Client()
+    
+    # 执行登录
+    print(f"\n1. 执行登录...")
+    success, message = client.login(base_url, account, password)
+    
+    print(f"   登录结果: {success}")
+    print(f"   登录消息: {message}")
+    
+    if not success:
+        print("   ❌ 登录失败，无法继续测试")
+        return False
+    
+    print(f"\n2. 检查提取的用户信息...")
+    print(f"   机构代码: {client.org_code}")
+    print(f"   医生姓名: {client.doctor_name}")
+    print(f"   团队名称: {client.team_name}")
+    print(f"   是否已登录: {client.logged_in}")
+    
+    # 检查加密令牌
+    print(f"\n3. 检查加密令牌...")
+    print(f"   en token: {client.token_en}")
+    print(f"   th token: {client.token_th}")
+    
+    if client.token_en and client.token_th:
+        print("   ✅ 加密令牌提取成功")
+    else:
+        print("   ❌ 加密令牌提取失败")
+    
+    # 检查机构代码
+    if client.org_code:
+        print(f"   ✅ 机构代码提取成功: {client.org_code}")
+        
+        # 尝试获取机构树
+        print(f"\n4. 尝试获取机构树...")
+        orgs = client.get_org_tree("0")
+        
+        if orgs:
+            print(f"   找到机构节点: {len(orgs)}个")
+            for i, (org_id, org_name) in enumerate(orgs[:3]):
+                print(f"     {i+1}. {org_id} - {org_name}")
+        else:
+            print("   ⚠️  未找到机构节点")
+    else:
+        print("   ❌ 机构代码未提取")
+        
+        # 尝试手动获取机构树
+        print(f"\n4. 尝试手动获取机构树...")
+        orgs = client.get_org_tree("0")
+        
+        if orgs:
+            print(f"   找到机构节点: {len(orgs)}个")
+            for i, (org_id, org_name) in enumerate(orgs[:3]):
+                print(f"     {i+1}. {org_id} - {org_name}")
+            
+            # 尝试向下钻取
+            print(f"\n5. 尝试向下钻取机构树...")
+            client._drill_org_tree(orgs)
+            
+            print(f"   钻取后机构代码: {client.org_code}")
+        else:
+            print("   ❌ 未找到机构节点")
+    
+    # 测试查询功能
+    print(f"\n6. 测试查询功能...")
+    try:
+        # 尝试查询签约列表
+        patients = client.query_signed_list(
+            org_code=client.org_code or "",
+            page_no=1,
+            page_size=10
+        )
+        
+        if patients:
+            print(f"   查询成功，找到 {len(patients)} 个患者")
+            for i, patient in enumerate(patients[:3]):
+                print(f"     {i+1}. {patient.name} ({patient.id_card})")
+            return True
+        else:
+            print("   ⚠️  查询成功但未找到患者数据")
+            return True
+            
+    except Exception as e:
+        print(f"   ❌ 查询失败: {str(e)}")
+        return False
 
-def test_configuration_fixes():
-    print("=" * 80)
-    print("湾流签约助手 - 综合配置修复测试")
-    print("=" * 80)
+def test_config_save():
+    """测试配置保存"""
+    print("\n" + "="*60)
+    print("测试配置保存")
+    print("="*60)
     
-    print("\n1. 测试配置管理器验证逻辑:")
+    config_file = "gulfsign_config.json"
     
-    try:
-        from GulfSign_Client_Package.core_modules.config_manager import ConfigManager
+    # 读取当前配置
+    if os.path.exists(config_file):
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
         
-        config_manager = ConfigManager()
+        print("当前配置:")
+        print(json.dumps(config, indent=2, ensure_ascii=False))
         
-        # 测试验证逻辑 - 密码字段可以为空
-        test_config = {
-            "username": "test_user",
-            "password": "",  # 空密码应该被允许
-            "ggws_base_url": "https://ggws.hnhfpc.gov.cn"
-        }
+        # 检查关键字段
+        missing_fields = []
+        if not config.get("username"):
+            missing_fields.append("username")
+        if not config.get("ggws_base_url"):
+            missing_fields.append("ggws_base_url")
+        if not config.get("password"):
+            print("   ⚠️  密码字段为空")
         
-        is_valid, message = config_manager._validate_config(test_config)
-        print(f"   验证测试配置: {'✓ 通过' if is_valid else '✗ 失败'} - {message}")
-        
-        # 测试必需字段检查
-        test_config_missing_username = {
-            "password": "test_password",
-            "ggws_base_url": "https://ggws.hnhfpc.gov.cn"
-        }
-        
-        is_valid2, message2 = config_manager._validate_config(test_config_missing_username)
-        print(f"   测试缺失用户名: {'✓ 正确失败' if not is_valid2 else '✗ 应该失败'} - {message2}")
-        
-    except Exception as e:
-        print(f"   ✗ 配置管理器测试失败: {e}")
-    
-    print("\n2. 测试应用程序配置恢复逻辑:")
-    
-    try:
-        # 模拟应用程序配置恢复
-        class MockApp:
-            def __init__(self):
-                self.client = MockPH3Client()
-                self.var_account = MockVar()
-                self.var_url = MockVar()
-                self.var_org = MockVar()
-                self._cfg = {}
-            
-            def _restore_config(self):
-                """模拟配置恢复逻辑"""
-                c = self._cfg
-                
-                # 兼容新旧配置格式
-                # 新格式使用 "username"，旧格式使用 "account"
-                if c.get("username"):
-                    self.var_account.set(c["username"])
-                elif c.get("account"):
-                    self.var_account.set(c["account"])
-                
-                # 新格式使用 "ggws_base_url"，旧格式使用 "url"
-                base_url = ""
-                if c.get("ggws_base_url"):
-                    base_url = c["ggws_base_url"]
-                    self.var_url.set(base_url)
-                elif c.get("url"):
-                    base_url = c["url"]
-                    self.var_url.set(base_url)
-                
-                # 设置PH3Client的base_url
-                if base_url:
-                    self.client.base_url = base_url.rstrip("/")
-                
-                if c.get("org_code"):
-                    self.var_org.set(c["org_code"])
-        
-        class MockPH3Client:
-            def __init__(self):
-                self.base_url = ""
-            
-            def _url(self, path):
-                """模拟 URL 构建方法"""
-                return self.base_url + path
-        
-        class MockVar:
-            def __init__(self):
-                self._value = ""
-            
-            def set(self, value):
-                self._value = value
-            
-            def get(self):
-                return self._value
-        
-        # 测试1: 新格式配置
-        print("   测试新格式配置恢复:")
-        app1 = MockApp()
-        app1._cfg = {
-            "username": "431122012",
-            "ggws_base_url": "https://ggws.hnhfpc.gov.cn",
-            "org_code": "430726000001010"
-        }
-        app1._restore_config()
-        
-        print(f"     账号: {app1.var_account.get()} (期望: 431122012)")
-        print(f"     URL: {app1.var_url.get()} (期望: https://ggws.hnhfpc.gov.cn)")
-        print(f"     机构代码: {app1.var_org.get()} (期望: 430726000001010)")
-        print(f"     客户端 base_url: {app1.client.base_url} (期望: https://ggws.hnhfpc.gov.cn)")
-        
-        # 测试2: 旧格式配置
-        print("\n   测试旧格式配置恢复:")
-        app2 = MockApp()
-        app2._cfg = {
-            "account": "old_account",
-            "url": "https://old.example.com",
-            "org_code": "old_org_code"
-        }
-        app2._restore_config()
-        
-        print(f"     账号: {app2.var_account.get()} (期望: old_account)")
-        print(f"     URL: {app2.var_url.get()} (期望: https://old.example.com)")
-        print(f"     机构代码: {app2.var_org.get()} (期望: old_org_code)")
-        print(f"     客户端 base_url: {app2.client.base_url} (期望: https://old.example.com)")
-        
-        # 测试3: 混合格式配置
-        print("\n   测试混合格式配置恢复:")
-        app3 = MockApp()
-        app3._cfg = {
-            "account": "mixed_account",  # 旧字段
-            "ggws_base_url": "https://mixed.example.com",  # 新字段
-            "org_code": "mixed_org"
-        }
-        app3._restore_config()
-        
-        print(f"     账号: {app3.var_account.get()} (期望: mixed_account)")
-        print(f"     URL: {app3.var_url.get()} (期望: https://mixed.example.com)")
-        print(f"     机构代码: {app3.var_org.get()} (期望: mixed_org)")
-        print(f"     客户端 base_url: {app3.client.base_url} (期望: https://mixed.example.com)")
-        
-    except Exception as e:
-        print(f"   ✗ 应用程序配置恢复测试失败: {e}")
-    
-    print("\n3. 测试诊断功能配置检查:")
-    
-    try:
-        # 模拟诊断功能
-        class MockDiagnosticsApp:
-            def __init__(self):
-                self._cfg = {}
-            
-            def _perform_login_diagnosis(self):
-                """模拟诊断执行"""
-                diagnostics = []
-                
-                # 检查配置
-                missing = []
-                if not self._cfg.get("username"):
-                    missing.append("账号")
-                if not self._cfg.get("ggws_base_url"):
-                    missing.append("3.0系统地址")
-                # org_code 不是必需字段，用户登录后可以从系统获取
-                
-                if missing:
-                    diagnostics.append(("配置完整性", False, f"缺失: {', '.join(missing)}"))
-                else:
-                    diagnostics.append(("配置完整性", True, "配置完整"))
-                
-                return diagnostics
-        
-        # 测试1: 完整配置
-        print("   测试完整配置诊断:")
-        diag_app1 = MockDiagnosticsApp()
-        diag_app1._cfg = {
-            "username": "431122012",
-            "ggws_base_url": "https://ggws.hnhfpc.gov.cn",
-            "org_code": ""  # 可以为空
-        }
-        results1 = diag_app1._perform_login_diagnosis()
-        
-        for name, success, message in results1:
-            if name == "配置完整性":
-                print(f"     配置完整性: {'✓ 通过' if success else '✗ 失败'} - {message}")
-                if success:
-                    print("     ✓ org_code 为空但诊断通过 (正确)")
-        
-        # 测试2: 缺失必需字段
-        print("\n   测试缺失必需字段诊断:")
-        diag_app2 = MockDiagnosticsApp()
-        diag_app2._cfg = {
-            "username": "",  # 缺失
-            "ggws_base_url": "https://ggws.hnhfpc.gov.cn"
-        }
-        results2 = diag_app2._perform_login_diagnosis()
-        
-        for name, success, message in results2:
-            if name == "配置完整性":
-                print(f"     配置完整性: {'✓ 正确失败' if not success else '✗ 应该失败'} - {message}")
-        
-        # 测试3: 缺失 base_url
-        print("\n   测试缺失 base_url 诊断:")
-        diag_app3 = MockDiagnosticsApp()
-        diag_app3._cfg = {
-            "username": "431122012",
-            "ggws_base_url": ""  # 缺失
-        }
-        results3 = diag_app3._perform_login_diagnosis()
-        
-        for name, success, message in results3:
-            if name == "配置完整性":
-                print(f"     配置完整性: {'✓ 正确失败' if not success else '✗ 应该失败'} - {message}")
-        
-    except Exception as e:
-        print(f"   ✗ 诊断功能测试失败: {e}")
-    
-    print("\n4. 测试实际配置文件:")
-    
-    # 检查根目录配置文件
-    root_config_path = project_root / "gulfsign_config.json"
-    print(f"   根目录配置文件: {root_config_path}")
-    
-    if root_config_path.exists():
-        with open(root_config_path, 'r', encoding='utf-8') as f:
-            root_config = json.load(f)
-        
-        issues = []
-        
-        if not root_config.get('username'):
-            issues.append("username 字段为空")
-        
-        if not root_config.get('ggws_base_url'):
-            issues.append("ggws_base_url 字段为空")
-        
-        if issues:
-            print(f"   ✗ 配置文件问题: {', '.join(issues)}")
+        if missing_fields:
+            print(f"   ❌ 缺失字段: {', '.join(missing_fields)}")
+            return False
         else:
-            print(f"   ✓ 配置文件字段完整")
-            print(f"     username: {root_config.get('username')}")
-            print(f"     ggws_base_url: {root_config.get('ggws_base_url')}")
-            print(f"     org_code: {root_config.get('org_code', '未设置')}")
+            print("   ✅ 配置完整")
+            return True
     else:
-        print("   ✗ 根目录配置文件不存在")
+        print("   ❌ 配置文件不存在")
+        return False
+
+def test_app_startup():
+    """测试应用程序启动"""
+    print("\n" + "="*60)
+    print("测试应用程序启动")
+    print("="*60)
     
-    # 检查核心模块配置文件
-    core_config_path = project_root / "GulfSign_Client_Package/core_modules/gulfsign_config.json"
-    print(f"\n   核心模块配置文件: {core_config_path}")
-    
-    if core_config_path.exists():
-        with open(core_config_path, 'r', encoding='utf-8') as f:
-            core_config = json.load(f)
+    try:
+        # 尝试导入并创建应用实例
+        from app import GulfSignApp
+        import tkinter as tk
         
-        issues = []
+        print("1. 导入模块成功")
         
-        if not core_config.get('username'):
-            issues.append("username 字段为空")
+        # 创建根窗口
+        root = tk.Tk()
+        root.withdraw()  # 隐藏主窗口
         
-        if not core_config.get('ggws_base_url'):
-            issues.append("ggws_base_url 字段为空")
+        print("2. 创建Tkinter根窗口成功")
         
-        if issues:
-            print(f"   ✗ 配置文件问题: {', '.join(issues)}")
+        # 创建应用实例
+        app = GulfSignApp(root)
+        
+        print("3. 创建GulfSignApp实例成功")
+        
+        # 检查UI变量
+        print("4. 检查UI变量...")
+        variables = [
+            ("var_url", app.var_url),
+            ("var_account", app.var_account),
+            ("var_password", app.var_password),
+            ("var_org", app.var_org),
+            ("var_doctor", app.var_doctor),
+            ("var_team", app.var_team),
+        ]
+        
+        all_vars_ok = True
+        for name, var in variables:
+            if hasattr(var, 'get'):
+                print(f"   ✅ {name}: 存在")
+            else:
+                print(f"   ❌ {name}: 不存在")
+                all_vars_ok = False
+        
+        if all_vars_ok:
+            print("   ✅ 所有UI变量初始化成功")
         else:
-            print(f"   ✓ 配置文件字段完整")
-            print(f"     username: {core_config.get('username')}")
-            print(f"     ggws_base_url: {core_config.get('ggws_base_url')}")
-            print(f"     org_code: {core_config.get('org_code', '未设置')}")
-    else:
-        print("   ✗ 核心模块配置文件不存在")
+            print("   ❌ 部分UI变量初始化失败")
+        
+        # 检查配置
+        print("5. 检查配置...")
+        if hasattr(app, '_cfg') and app._cfg:
+            print(f"   ✅ 配置加载成功，账号: {app._cfg.get('username', '未设置')}")
+        else:
+            print("   ❌ 配置加载失败")
+        
+        # 清理
+        root.destroy()
+        
+        return all_vars_ok
+        
+    except Exception as e:
+        print(f"   ❌ 应用程序启动测试失败: {str(e)}")
+        return False
+
+def main():
+    """主测试函数"""
+    print("开始综合测试修复...")
     
-    print("\n5. 问题分析和解决方案:")
+    # 测试1: PH3Client登录
+    login_success = test_ph3client_login()
     
-    print("   根据用户报告的问题:")
-    print("   1. '缺失账号' (missing account)")
-    print("   2. '缺失机构代码' (missing institution code)")
-    print("   3. '缺失 3.0系统地址' (missing 3.0 system base URL)")
+    # 测试2: 配置保存
+    config_success = test_config_save()
     
-    print("\n   我们的修复措施:")
-    print("   1. ✓ 更新了 _restore_config() 方法以兼容新旧配置格式")
-    print("   2. ✓ 修复了 ConfigManager 验证逻辑（不再要求密码字段）")
-    print("   3. ✓ 修复了字段映射错误（org_code 映射到 org_code，而不是 password）")
-    print("   4. ✓ 更新了诊断功能配置检查（org_code 不是必需字段）")
+    # 测试3: 应用程序启动
+    app_success = test_app_startup()
     
-    print("\n   当前状态:")
-    print("   - 配置文件有正确的 username 和 ggws_base_url 字段")
-    print("   - org_code 字段可以为空（不是必需字段）")
-    print("   - 应用程序启动时会正确恢复配置")
-    print("   - PH3Client 的 base_url 会被正确设置")
+    # 总结
+    print("\n" + "="*60)
+    print("测试总结")
+    print("="*60)
     
-    print("\n   如果用户仍然看到错误，可能的原因:")
-    print("   1. 应用程序加载了错误的配置文件")
-    print("   2. 配置字段名仍然不匹配")
-    print("   3. 有其他地方在进行配置检查")
-    print("   4. 模态对话框有 bug，无法关闭")
+    print(f"1. PH3Client登录测试: {'✅ 通过' if login_success else '❌ 失败'}")
+    print(f"2. 配置保存测试: {'✅ 通过' if config_success else '❌ 失败'}")
+    print(f"3. 应用程序启动测试: {'✅ 通过' if app_success else '❌ 失败'}")
     
-    print("\n   建议的下一步:")
-    print("   1. 运行应用程序进行实际测试")
-    print("   2. 检查是否有其他配置文件被加载")
-    print("   3. 确保所有配置字段名一致")
-    print("   4. 修复模态对话框的关闭逻辑")
+    overall_success = login_success and config_success and app_success
     
-    print("\n" + "=" * 80)
-    print("测试完成")
-    print("=" * 80)
+    print(f"\n总体结果: {'✅ 所有测试通过' if overall_success else '❌ 部分测试失败'}")
     
-    return True
+    if not overall_success:
+        print("\n需要进一步修复的问题:")
+        if not login_success:
+            print("   - PH3Client登录或用户信息提取失败")
+        if not config_success:
+            print("   - 配置保存或完整性检查失败")
+        if not app_success:
+            print("   - 应用程序启动或UI变量初始化失败")
+    
+    return overall_success
 
 if __name__ == "__main__":
-    success = test_configuration_fixes()
+    success = main()
     sys.exit(0 if success else 1)
