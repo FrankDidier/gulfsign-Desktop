@@ -268,7 +268,7 @@ class ConfigManager:
         # 映射旧格式字段到新格式
         field_mapping = {
             'account': 'username',
-            'org_code': 'password',
+            'org_code': 'org_code',
             'doctor': 'doctor_name',
             'team': 'doctor_team',
             'url': 'ggws_base_url',
@@ -309,8 +309,8 @@ class ConfigManager:
     def _validate_config(self, config: Dict[str, Any]) -> Tuple[bool, str]:
         """验证配置有效性"""
         
-        # 检查必需字段
-        required_fields = ['username', 'password']
+        # 检查必需字段 - 只检查 username，password 可以为空（用户登录时输入）
+        required_fields = ['username']
         for field in required_fields:
             if not config.get(field):
                 return False, f"必需字段 '{field}' 不能为空"

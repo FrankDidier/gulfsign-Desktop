@@ -2286,10 +2286,26 @@ class GulfSignApp(tk.Tk):
 
     def _restore_config(self):
         c = self._cfg
-        if c.get("url"):
-            self.var_url.set(c["url"])
-        if c.get("account"):
+        # 兼容新旧配置格式
+        # 新格式使用 "username"，旧格式使用 "account"
+        if c.get("username"):
+            self.var_account.set(c["username"])
+        elif c.get("account"):
             self.var_account.set(c["account"])
+        
+        # 新格式使用 "ggws_base_url"，旧格式使用 "url"
+        base_url = ""
+        if c.get("ggws_base_url"):
+            base_url = c["ggws_base_url"]
+            self.var_url.set(base_url)
+        elif c.get("url"):
+            base_url = c["url"]
+            self.var_url.set(base_url)
+        
+        # 设置PH3Client的base_url
+        if base_url:
+            self.client.base_url = base_url.rstrip("/")
+        
         if c.get("org_code"):
             self.var_org.set(c["org_code"])
         if c.get("doctor"):
@@ -2338,8 +2354,10 @@ class GulfSignApp(tk.Tk):
 
     def _save_current_config(self):
         config_data = {
-            "url": self.var_url.get(),
-            "account": self.var_account.get(),
+            # 使用新格式字段名
+            "username": self.var_account.get(),
+            "ggws_base_url": self.var_url.get(),
+            # 其他字段
             "org_code": self.var_org.get(),
             "doctor": self.var_doctor.get(),
             "team": self.var_team.get(),
@@ -3664,8 +3682,9 @@ class GulfSignApp(tk.Tk):
         missing = []
         if not self._cfg.get("username"):
             missing.append("账号")
-        if not self._cfg.get("org_code"):
-            missing.append("机构代码")
+        if not self._cfg.get("ggws_base_url"):
+            missing.append("3.0系统地址")
+        # org_code 不是必需字段，用户登录后可以从系统获取
         
         if missing:
             diagnostics.append(("配置完整性", False, f"缺失: {', '.join(missing)}"))
