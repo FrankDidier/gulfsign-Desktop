@@ -704,22 +704,33 @@ class GulfSignApp(tk.Tk):
         diag_frame.pack(fill=tk.X, pady=(0, 10))
         
         # 诊断结果显示
-        self.enhanced_diag_text = scrolledtext.ScrolledText(diag_frame, height=6, wrap=tk.WORD)
+        self.enhanced_diag_text = scrolledtext.ScrolledText(diag_frame, height=8, wrap=tk.WORD)
         self.enhanced_diag_text.pack(fill=tk.X)
         self.enhanced_diag_text.configure(state=tk.DISABLED)
         
-        # 诊断按钮
+        # 诊断按钮区域
         button_frame = ttk.Frame(diag_frame)
         button_frame.pack(fill=tk.X, pady=(5, 0))
         
+        # 基础诊断按钮
         self.enhanced_diagnose_btn = ttk.Button(
             button_frame,
-            text="🔍 诊断连接",
+            text="🔍 基础诊断",
             command=self._run_login_diagnosis,
             width=12
         )
         self.enhanced_diagnose_btn.pack(side=tk.LEFT)
         
+        # 详细诊断按钮
+        self.enhanced_detailed_diagnose_btn = ttk.Button(
+            button_frame,
+            text="🔬 详细诊断",
+            command=self._run_detailed_diagnosis,
+            width=12
+        )
+        self.enhanced_detailed_diagnose_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 同步配置按钮
         self.enhanced_sync_btn = ttk.Button(
             button_frame,
             text="🔄 同步配置",
@@ -3691,6 +3702,18 @@ class GulfSignApp(tk.Tk):
         """运行诊断"""
         self._run_login_initial_diagnosis()
     
+    def _run_detailed_diagnosis(self):
+        """运行详细诊断"""
+        self.enhanced_status_var.set("正在执行详细诊断...")
+        self.enhanced_diagnose_btn.configure(state=tk.DISABLED)
+        self.enhanced_detailed_diagnose_btn.configure(state=tk.DISABLED)
+        
+        def worker():
+            diagnostics = self._perform_detailed_diagnosis()
+            self.after(0, lambda: self._display_detailed_diagnostics(diagnostics))
+        
+        threading.Thread(target=worker, daemon=True).start()
+    
     def _perform_login_diagnosis(self) -> List[Tuple[str, bool, str]]:
         """执行诊断"""
         diagnostics = []
@@ -3699,22 +3722,85 @@ class GulfSignApp(tk.Tk):
         try:
             response = requests.get("https://www.baidu.com", timeout=5)
             diagnostics.append(("网络连接", True, "网络连接正常"))
-        except:
-            diagnostics.append(("网络连接", False, "网络连接失败"))
+        except Exception as e:
+            diagnostics.append(("网络连接", False, f"网络连接失败: {str(e)}"))
         
-        # 2. 测试公卫3.0系统
+        # 2. 测试公卫3.0系统 - 使用多种SSL/TLS配置
         base_url = self.enhanced_url_var.get()
+        if not base_url:
+            diagnostics.append(("公卫3.0系统", False, "系统地址为空"))
+            diagnostics.append(("配置完整性", False, "缺失: 3.0系统地址"))
+            diagnostics.append(("登录状态", False, "未登录"))
+            return diagnostics
+        
+        # 尝试多种SSL/TLS配置
+        connection_success = False
+        connection_error = ""
+        
+        # 配置1: 标准HTTPS连接
         try:
-            response = requests.get(base_url, timeout=10, verify=False)
+            response = requests.get(base_url, timeout=10, verify=True)
             if response.status_code == 200:
                 if "ggws" in response.text.lower() or "公卫" in response.text:
-                    diagnostics.append(("公卫3.0系统", True, "系统可正常访问"))
+                    diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (标准HTTPS)"))
+                    connection_success = True
                 else:
                     diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
             else:
                 diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
         except Exception as e:
-            diagnostics.append(("公卫3.0系统", False, f"访问失败: {str(e)}"))
+            connection_error = f"标准HTTPS失败: {str(e)}"
+        
+        # 配置2: 跳过证书验证
+        if not connection_success:
+            try:
+                response = requests.get(base_url, timeout=10, verify=False)
+                if response.status_code == 200:
+                    if "ggws" in response.text.lower() or "公卫" in response.text:
+                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (跳过证书验证)"))
+                        connection_success = True
+                    else:
+                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+            except Exception as e:
+                connection_error = f"跳过证书验证失败: {str(e)}"
+        
+        # 配置3: 使用较旧的SSL/TLS版本
+        if not connection_success:
+            try:
+                import ssl
+                import urllib3
+                
+                # 创建自定义SSL上下文，支持较旧的协议
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                ssl_context.set_ciphers('DEFAULT@SECLEVEL=1')  # 降低安全级别以支持较旧的加密套件
+                
+                # 尝试使用urllib3
+                http = urllib3.PoolManager(
+                    ssl_context=ssl_context,
+                    retries=urllib3.Retry(total=3, backoff_factor=0.5),
+                    timeout=urllib3.Timeout(connect=5.0, read=10.0)
+                )
+                
+                response = http.request('GET', base_url)
+                if response.status == 200:
+                    response_text = response.data.decode('utf-8', errors='ignore')
+                    if "ggws" in response_text.lower() or "公卫" in response_text:
+                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (兼容SSL/TLS)"))
+                        connection_success = True
+                    else:
+                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status}"))
+            except Exception as e:
+                connection_error = f"兼容SSL/TLS失败: {str(e)}"
+        
+        # 如果所有配置都失败
+        if not connection_success:
+            diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
         
         # 3. 检查配置
         missing = []
@@ -3772,8 +3858,184 @@ class GulfSignApp(tk.Tk):
             self.enhanced_sync_btn.configure(state=tk.NORMAL)
         else:
             self.enhanced_status_var.set("诊断完成: 发现一些问题")
-            self.enhanced_connection_status_var.set("连接异常")
-            self.enhanced_connection_status_label.configure(foreground="red")
+            self.enhanced_connection_var.set("连接异常")
+            self.enhanced_connection_label.configure(foreground="red")
+    
+    def _perform_detailed_diagnosis(self) -> List[Tuple[str, bool, str, str]]:
+        """执行详细诊断"""
+        diagnostics = []
+        
+        # 1. 测试网络连接
+        try:
+            import socket
+            start_time = time.time()
+            socket.create_connection(("www.baidu.com", 443), timeout=5)
+            response_time = int((time.time() - start_time) * 1000)
+            diagnostics.append(("网络连接", True, f"连接正常 (响应时间: {response_time}ms)", ""))
+        except Exception as e:
+            diagnostics.append(("网络连接", False, f"连接失败", str(e)))
+        
+        # 2. 测试DNS解析
+        try:
+            import socket
+            start_time = time.time()
+            socket.gethostbyname("ggws.hnhfpc.gov.cn")
+            dns_time = int((time.time() - start_time) * 1000)
+            diagnostics.append(("DNS解析", True, f"解析成功 (耗时: {dns_time}ms)", ""))
+        except Exception as e:
+            diagnostics.append(("DNS解析", False, f"解析失败", str(e)))
+        
+        # 3. 测试公卫3.0系统连接
+        base_url = self.enhanced_url_var.get()
+        if not base_url:
+            diagnostics.append(("系统连接", False, "系统地址为空", ""))
+        else:
+            # 测试多种SSL/TLS配置
+            ssl_configs = [
+                ("标准HTTPS", {"verify": True}),
+                ("跳过证书验证", {"verify": False}),
+                ("兼容模式", {"verify": False, "timeout": 15})
+            ]
+            
+            connection_success = False
+            best_config = ""
+            error_details = ""
+            
+            for config_name, config_params in ssl_configs:
+                try:
+                    start_time = time.time()
+                    response = requests.get(base_url, timeout=10, **config_params)
+                    response_time = int((time.time() - start_time) * 1000)
+                    
+                    if response.status_code == 200:
+                        connection_success = True
+                        best_config = config_name
+                        server_info = ""
+                        
+                        # 提取服务器信息
+                        if 'Server' in response.headers:
+                            server_info = f"服务器: {response.headers['Server']}"
+                        
+                        # 检查是否是公卫系统
+                        is_ggws = "ggws" in response.text.lower() or "公卫" in response.text
+                        system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                        
+                        diagnostics.append(("系统连接", True, 
+                                          f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                          server_info))
+                        break
+                    else:
+                        error_details = f"HTTP {response.status_code}"
+                except Exception as e:
+                    error_details = str(e)
+            
+            if not connection_success:
+                diagnostics.append(("系统连接", False, 
+                                  f"所有连接尝试均失败", 
+                                  f"最后错误: {error_details}"))
+        
+        # 4. 检查配置完整性
+        missing_fields = []
+        config_details = []
+        
+        for field, display_name in [
+            ("username", "账号"),
+            ("ggws_base_url", "系统地址"),
+            ("org_code", "机构代码"),
+            ("doctor", "签约医生"),
+            ("team", "签约团队")
+        ]:
+            value = self._cfg.get(field, "")
+            if value:
+                config_details.append(f"{display_name}: {value}")
+            else:
+                missing_fields.append(display_name)
+        
+        if missing_fields:
+            diagnostics.append(("配置检查", False, 
+                              f"缺失字段: {', '.join(missing_fields)}",
+                              f"现有配置: {'; '.join(config_details) if config_details else '无'}"))
+        else:
+            diagnostics.append(("配置检查", True, 
+                              "所有必需配置完整",
+                              f"配置详情: {'; '.join(config_details)}"))
+        
+        # 5. 检查登录状态
+        if hasattr(self.client, 'logged_in') and self.client.logged_in:
+            user_info = self._cfg.get("username", "未知用户")
+            org_info = self._cfg.get("org_name", "")
+            if org_info:
+                user_info = f"{user_info} ({org_info})"
+            
+            diagnostics.append(("登录状态", True, 
+                              f"已登录: {user_info}",
+                              f"会话有效"))
+        else:
+            diagnostics.append(("登录状态", False, 
+                              "未登录或会话已过期",
+                              "请使用API登录或网页登录"))
+        
+        return diagnostics
+    
+    def _display_detailed_diagnostics(self, diagnostics: List[Tuple[str, bool, str, str]]):
+        """显示详细诊断结果"""
+        self.enhanced_diag_text.configure(state=tk.NORMAL)
+        self.enhanced_diag_text.delete(1.0, tk.END)
+        
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.enhanced_diag_text.insert(tk.END, f"详细诊断时间: {current_time}\n")
+        self.enhanced_diag_text.insert(tk.END, "="*60 + "\n\n")
+        
+        all_passed = True
+        
+        for name, success, message, details in diagnostics:
+            icon = "✅" if success else "❌"
+            tag = "success" if success else "error"
+            
+            if not success:
+                all_passed = False
+            
+            self.enhanced_diag_text.insert(tk.END, f"{icon} {name}: ")
+            self.enhanced_diag_text.insert(tk.END, f"{message}\n", tag)
+            
+            if details:
+                self.enhanced_diag_text.insert(tk.END, f"   └─ {details}\n", "details")
+        
+        # 配置标签样式
+        self.enhanced_diag_text.tag_config("success", foreground="green")
+        self.enhanced_diag_text.tag_config("error", foreground="red")
+        self.enhanced_diag_text.tag_config("details", foreground="gray")
+        
+        self.enhanced_diag_text.configure(state=tk.DISABLED)
+        self.enhanced_diagnose_btn.configure(state=tk.NORMAL)
+        self.enhanced_detailed_diagnose_btn.configure(state=tk.NORMAL)
+        
+        if all_passed:
+            self.enhanced_status_var.set("详细诊断完成: 所有测试通过")
+            self.enhanced_connection_var.set("已连接")
+            self.enhanced_connection_label.configure(foreground="green")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        else:
+            self.enhanced_status_var.set("详细诊断完成: 发现问题")
+            self.enhanced_connection_var.set("连接异常")
+            self.enhanced_connection_label.configure(foreground="red")
+            
+            # 提供修复建议
+            self.enhanced_diag_text.configure(state=tk.NORMAL)
+            self.enhanced_diag_text.insert(tk.END, "\n" + "="*60 + "\n")
+            self.enhanced_diag_text.insert(tk.END, "🔧 修复建议:\n\n")
+            
+            for name, success, message, details in diagnostics:
+                if not success:
+                    if "SSL" in message or "握手" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 尝试使用网页登录方式\n", "advice")
+                    elif "缺失" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 请填写完整配置信息\n", "advice")
+                    elif "未登录" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 请先登录系统\n", "advice")
+            
+            self.enhanced_diag_text.tag_config("advice", foreground="blue")
+            self.enhanced_diag_text.configure(state=tk.DISABLED)
     
     def _open_web_login(self):
         """打开网页登录"""
