@@ -558,6 +558,30 @@ class GulfSignApp(tk.Tk):
         }
         self._pending_export_after_batch = False
 
+        # 创建UI变量
+        self.var_url = tk.StringVar()
+        self.var_account = tk.StringVar()
+        self.var_password = tk.StringVar()
+        self.var_org = tk.StringVar()
+        self.var_doctor = tk.StringVar()
+        self.var_team = tk.StringVar()
+        self.var_delay = tk.StringVar()
+        self.var_pop_type = tk.StringVar()
+        self.var_agree_start = tk.StringVar()
+        self.var_agree_end = tk.StringVar()
+        self.var_max_count = tk.StringVar()
+        self.var_hc_openid = tk.StringVar()
+        self.var_hc_orgcode = tk.StringVar()
+        self.var_hc_team = tk.StringVar()
+        self.var_hc_doctor = tk.StringVar()
+        self.var_hc_start = tk.StringVar()
+        self.var_hc_end = tk.StringVar()
+        self.var_license_user = tk.StringVar()
+        self.var_license_password = tk.StringVar()
+        self.var_license_server = tk.StringVar()
+        self.var_max_workers = tk.StringVar()
+        self.var_batch_size = tk.StringVar()
+
         self._cfg = load_config()
 
         self._build_ui()
