@@ -2380,6 +2380,7 @@ class GulfSignApp(tk.Tk):
         config_data = {
             # 使用新格式字段名
             "username": self.var_account.get(),
+            "password": self.var_password.get(),
             "ggws_base_url": self.var_url.get(),
             # 其他字段
             "org_code": self.var_org.get(),
