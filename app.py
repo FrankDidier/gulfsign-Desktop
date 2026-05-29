@@ -2331,6 +2331,12 @@ class GulfSignApp(tk.Tk):
             username = c["account"]
             self.var_account.set(username)
         
+        # 恢复密码字段
+        password = ""
+        if c.get("password"):
+            password = c["password"]
+            self.var_password.set(password)
+        
         # 新格式使用 "ggws_base_url"，旧格式使用 "url"
         base_url = ""
         if c.get("ggws_base_url"):
@@ -2353,6 +2359,10 @@ class GulfSignApp(tk.Tk):
         
         if hasattr(self, 'enhanced_api_account_var'):
             self.enhanced_api_account_var.set(username)
+        
+        # 恢复增强登录密码变量
+        if hasattr(self, 'enhanced_api_password_var') and password:
+            self.enhanced_api_password_var.set(password)
         
         if c.get("org_code"):
             self.var_org.set(c["org_code"])
@@ -3725,7 +3735,7 @@ class GulfSignApp(tk.Tk):
         except Exception as e:
             diagnostics.append(("网络连接", False, f"网络连接失败: {str(e)}"))
         
-        # 2. 测试公卫3.0系统 - 使用多种SSL/TLS配置
+        # 2. 测试公卫3.0系统 - 使用多种SSL/TLS配置和SSO重定向处理
         base_url = self.enhanced_url_var.get()
         if not base_url:
             diagnostics.append(("公卫3.0系统", False, "系统地址为空"))
@@ -3736,8 +3746,9 @@ class GulfSignApp(tk.Tk):
         # 尝试多种SSL/TLS配置
         connection_success = False
         connection_error = ""
+        redirect_info = ""
         
-        # 配置1: 使用自定义SSL适配器（支持SSO重定向）
+        # 配置1: 使用自定义SSL适配器处理SSO重定向（访问FormMain.aspx）
         try:
             import ssl
             from requests.adapters import HTTPAdapter
@@ -3760,16 +3771,21 @@ class GulfSignApp(tk.Tk):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             })
             
-            response = session.get(base_url, timeout=10, allow_redirects=True)
+            # 尝试访问FormMain.aspx（这会触发SSO重定向）
+            test_url = f"{base_url.rstrip('/')}/FormMain.aspx"
+            response = session.get(test_url, timeout=15, allow_redirects=True)
             
             if response.status_code == 200:
                 # 检查是否成功访问系统
-                if "ggws" in response.text.lower() or "公卫" in response.text or "Token" in response.url:
+                is_ggws = "ggws" in response.text.lower() or "公卫" in response.text or "湖南省基层卫生信息系统" in response.text
+                has_token = "Token" in response.url or "token" in response.url.lower()
+                
+                if is_ggws or has_token:
                     diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (支持SSO重定向)"))
                     connection_success = True
                     
                     # 检查是否有Token（SSO认证成功）
-                    if "Token" in response.url:
+                    if has_token:
                         diagnostics.append(("SSO认证", True, "检测到认证Token"))
                     else:
                         diagnostics.append(("SSO认证", False, "未检测到认证Token，可能需要登录"))
@@ -3781,15 +3797,19 @@ class GulfSignApp(tk.Tk):
             # 检查重定向链
             if response.history:
                 redirect_count = len(response.history)
-                diagnostics.append(("重定向处理", True, f"处理了 {redirect_count} 次重定向"))
+                redirect_info = f"处理了 {redirect_count} 次重定向"
+                diagnostics.append(("重定向处理", True, redirect_info))
                 
                 # 检查是否重定向到SSO服务器
                 sso_redirect = any("sso.hnhfpc.gov.cn" in resp.url for resp in response.history)
                 if sso_redirect:
                     diagnostics.append(("SSO重定向", True, "检测到SSO认证流程"))
                     
+        except requests.exceptions.TooManyRedirects as e:
+            connection_error = f"重定向过多: {str(e)}"
+            diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
         except Exception as e:
-            connection_error = f"自定义SSL适配器失败: {str(e)}"
+            connection_error = f"SSO重定向处理失败: {str(e)}"
         
         # 配置2: 标准HTTPS连接（备用）
         if not connection_success:
@@ -3822,7 +3842,7 @@ class GulfSignApp(tk.Tk):
                 connection_error = f"跳过证书验证失败: {str(e)}"
         
         # 如果所有配置都失败
-        if not connection_success:
+        if not connection_success and not connection_error.startswith("重定向过多"):
             diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
         
         # 3. 检查配置
@@ -3937,31 +3957,83 @@ class GulfSignApp(tk.Tk):
         if not base_url:
             diagnostics.append(("系统连接", False, "系统地址为空", ""))
         else:
-            # 测试多种SSL/TLS配置
-            ssl_configs = [
-                ("标准HTTPS", {"verify": True}),
-                ("跳过证书验证", {"verify": False}),
-                ("兼容模式", {"verify": False, "timeout": 15})
-            ]
-            
+            # 测试多种SSL/TLS配置和SSO重定向处理
             connection_success = False
             best_config = ""
             error_details = ""
+            redirect_info = ""
             
-            for config_name, config_params in ssl_configs:
+            # 配置1: 使用自定义SSL适配器处理SSO重定向
+            try:
+                import ssl
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.ssl_ import create_urllib3_context
+                
+                class CustomSSLAdapter(HTTPAdapter):
+                    """自定义SSL适配器，支持较旧的TLS版本和SSO重定向"""
+                    def init_poolmanager(self, *args, **kwargs):
+                        ctx = create_urllib3_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+                        kwargs['ssl_context'] = ctx
+                        return super().init_poolmanager(*args, **kwargs)
+                
+                session = requests.Session()
+                session.mount("https://", CustomSSLAdapter())
+                session.verify = False
+                session.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                
+                start_time = time.time()
+                
+                # 尝试访问FormMain.aspx（这会触发SSO重定向）
+                test_url = f"{base_url.rstrip('/')}/FormMain.aspx"
+                response = session.get(test_url, timeout=15, allow_redirects=True)
+                response_time = int((time.time() - start_time) * 1000)
+                
+                if response.status_code == 200:
+                    connection_success = True
+                    best_config = "SSO重定向处理"
+                    
+                    # 检查重定向链
+                    if response.history:
+                        redirect_count = len(response.history)
+                        redirect_info = f"处理了 {redirect_count} 次重定向"
+                        
+                        # 检查是否经过SSO服务器
+                        sso_redirect = any("sso.hnhfpc.gov.cn" in resp.url for resp in response.history)
+                        if sso_redirect:
+                            redirect_info += " (包含SSO认证)"
+                    
+                    # 检查是否是公卫系统
+                    is_ggws = "ggws" in response.text.lower() or "公卫" in response.text or "湖南省基层卫生信息系统" in response.text
+                    system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                    
+                    # 检查是否有Token
+                    has_token = "Token" in response.url or "token" in response.url.lower()
+                    token_info = "有认证Token" if has_token else "无Token（可能需要登录）"
+                    
+                    diagnostics.append(("系统连接", True, 
+                                      f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                      f"{redirect_info}; {token_info}"))
+                else:
+                    error_details = f"HTTP {response.status_code}"
+                    
+            except Exception as e:
+                error_details = f"SSO重定向处理失败: {str(e)}"
+            
+            # 配置2: 标准HTTPS连接（备用）
+            if not connection_success:
                 try:
                     start_time = time.time()
-                    response = requests.get(base_url, timeout=10, **config_params)
+                    response = requests.get(base_url, timeout=10, verify=True)
                     response_time = int((time.time() - start_time) * 1000)
                     
                     if response.status_code == 200:
                         connection_success = True
-                        best_config = config_name
-                        server_info = ""
-                        
-                        # 提取服务器信息
-                        if 'Server' in response.headers:
-                            server_info = f"服务器: {response.headers['Server']}"
+                        best_config = "标准HTTPS"
                         
                         # 检查是否是公卫系统
                         is_ggws = "ggws" in response.text.lower() or "公卫" in response.text
@@ -3969,12 +4041,34 @@ class GulfSignApp(tk.Tk):
                         
                         diagnostics.append(("系统连接", True, 
                                           f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
-                                          server_info))
-                        break
+                                          ""))
                     else:
                         error_details = f"HTTP {response.status_code}"
                 except Exception as e:
-                    error_details = str(e)
+                    error_details = f"标准HTTPS失败: {str(e)}"
+            
+            # 配置3: 跳过证书验证（备用）
+            if not connection_success:
+                try:
+                    start_time = time.time()
+                    response = requests.get(base_url, timeout=10, verify=False)
+                    response_time = int((time.time() - start_time) * 1000)
+                    
+                    if response.status_code == 200:
+                        connection_success = True
+                        best_config = "跳过证书验证"
+                        
+                        # 检查是否是公卫系统
+                        is_ggws = "ggws" in response.text.lower() or "公卫" in response.text
+                        system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                        
+                        diagnostics.append(("系统连接", True, 
+                                          f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                          ""))
+                    else:
+                        error_details = f"HTTP {response.status_code}"
+                except Exception as e:
+                    error_details = f"跳过证书验证失败: {str(e)}"
             
             if not connection_success:
                 diagnostics.append(("系统连接", False, 
