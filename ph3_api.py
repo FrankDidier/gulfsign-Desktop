@@ -276,58 +276,133 @@ class PH3Client:
     def _extract_user_info(self, html: str):
         # 尝试多种机构代码模式
         org_patterns = [
-            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{15,})['"]""",
-            r"""orgCode\s*:\s*['"](\d{15,})['"]""",
-            r"""orgCode\s*=\s*['"](\d{15,})['"]""",
-            r"""orgcode\s*:\s*['"](\d{15,})['"]""",
-            r"""orgcode\s*=\s*['"](\d{15,})['"]""",
-            r"""ORGCODE\s*:\s*['"](\d{15,})['"]""",
-            r"""ORGCODE\s*=\s*['"](\d{15,})['"]""",
-            r"""var\s+orgCode\s*=\s*['"](\d{15,})['"]""",
-            r"""var\s+ORGCODE\s*=\s*['"](\d{15,})['"]""",
+            # 模式1: ORGCODE = '431122012345678' 或 orgcode = "431122012345678"
+            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{10,})['"]""",
+            # 模式2: orgCode: '431122012345678'
+            r"""orgCode\s*:\s*['"](\d{10,})['"]""",
+            # 模式3: orgCode = '431122012345678'
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            # 模式4: orgcode: '431122012345678'
+            r"""orgcode\s*:\s*['"](\d{10,})['"]""",
+            # 模式5: orgcode = '431122012345678'
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            # 模式6: ORGCODE: '431122012345678'
+            r"""ORGCODE\s*:\s*['"](\d{10,})['"]""",
+            # 模式7: ORGCODE = '431122012345678'
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            # 模式8: var orgCode = '431122012345678'
+            r"""var\s+orgCode\s*=\s*['"](\d{10,})['"]""",
+            # 模式9: var ORGCODE = '431122012345678'
+            r"""var\s+ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            # 模式10: <input name="orgcode" value="431122012345678">
+            r"""name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            # 模式11: <input type="hidden" name="orgcode" value="431122012345678">
+            r"""type\s*=\s*['"]hidden['"]\s+name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            # 模式12: data-orgcode="431122012345678"
+            r"""data-orgcode\s*=\s*['"](\d{10,})['"]""",
+            # 模式13: orgCode="431122012345678" (无空格)
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            # 模式14: orgcode="431122012345678" (无空格)
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            # 模式15: ORGCODE="431122012345678" (无空格)
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            # 模式16: 更通用的模式: 包含"org"和10位以上数字
+            r"""org[^>]*?['"](\d{10,})['"]""",
         ]
         
-        for pattern in org_patterns:
+        extracted = False
+        for i, pattern in enumerate(org_patterns, 1):
             org_m = re.search(pattern, html, re.IGNORECASE)
             if org_m:
                 self.org_code = org_m.group(1)
+                logger.info(f"机构代码提取成功 (模式{i}): {self.org_code}")
+                extracted = True
                 break
+        
+        if not extracted:
+            logger.warning("机构代码提取失败，未找到匹配的模式")
+            # 尝试查找所有包含"org"的片段
+            org_snippets = re.findall(r'[^>]*org[^>]*', html, re.IGNORECASE)
+            if org_snippets:
+                logger.info(f"找到包含'org'的片段: {org_snippets[:3]}")
         
         # 尝试多种医生姓名模式
         name_patterns = [
+            # 模式1: UserName = '张三' 或 XINGMING = "李四"
             r"""(?:UserName|XINGMING|xm)\s*[=:]\s*['"]([^'"]+)['"]""",
+            # 模式2: userName: '王五'
             r"""userName\s*:\s*['"]([^'"]+)['"]""",
+            # 模式3: userName = '赵六'
             r"""userName\s*=\s*['"]([^'"]+)['"]""",
+            # 模式4: XINGMING: '钱七'
             r"""XINGMING\s*:\s*['"]([^'"]+)['"]""",
+            # 模式5: XINGMING = '孙八'
             r"""XINGMING\s*=\s*['"]([^'"]+)['"]""",
+            # 模式6: xm: '周九'
             r"""xm\s*:\s*['"]([^'"]+)['"]""",
+            # 模式7: xm = '吴十'
             r"""xm\s*=\s*['"]([^'"]+)['"]""",
+            # 模式8: var userName = '郑十一'
             r"""var\s+userName\s*=\s*['"]([^'"]+)['"]""",
+            # 模式9: var XINGMING = '王十二'
             r"""var\s+XINGMING\s*=\s*['"]([^'"]+)['"]""",
+            # 模式10: <input name="userName" value="李十三">
+            r"""name\s*=\s*['"]userName['"]\s+value\s*=\s*['"]([^'"]+)['"]""",
+            # 模式11: <input name="XINGMING" value="张十四">
+            r"""name\s*=\s*['"]XINGMING['"]\s+value\s*=\s*['"]([^'"]+)['"]""",
+            # 模式12: <input name="xm" value="刘十五">
+            r"""name\s*=\s*['"]xm['"]\s+value\s*=\s*['"]([^'"]+)['"]""",
+            # 模式13: 更通用的模式: 包含"name"和中文姓名
+            r"""(?:name|姓名|username|UserName|XINGMING|xm)[^>]*?['"]([\u4e00-\u9fa5]{2,4})['"]""",
         ]
         
-        for pattern in name_patterns:
+        name_extracted = False
+        for i, pattern in enumerate(name_patterns, 1):
             name_m = re.search(pattern, html, re.IGNORECASE)
             if name_m:
                 self.doctor_name = name_m.group(1).strip()
+                logger.info(f"医生姓名提取成功 (模式{i}): {self.doctor_name}")
+                name_extracted = True
                 break
+        
+        if not name_extracted:
+            logger.warning("医生姓名提取失败，未找到匹配的模式")
         
         # 尝试提取团队信息
         team_patterns = [
+            # 模式1: TEAMNAME = '家庭医生团队' 或 teamName = "社区医疗团队"
             r"""(?:TEAMNAME|teamname|TeamName)\s*[=:]\s*['"]([^'"]+)['"]""",
+            # 模式2: teamName: '乡镇卫生院团队'
             r"""teamName\s*:\s*['"]([^'"]+)['"]""",
+            # 模式3: teamName = '村卫生室团队'
             r"""teamName\s*=\s*['"]([^'"]+)['"]""",
+            # 模式4: TEAMNAME: '社区卫生服务中心团队'
             r"""TEAMNAME\s*:\s*['"]([^'"]+)['"]""",
+            # 模式5: TEAMNAME = '医疗集团团队'
             r"""TEAMNAME\s*=\s*['"]([^'"]+)['"]""",
+            # 模式6: var teamName = '专科医院团队'
             r"""var\s+teamName\s*=\s*['"]([^'"]+)['"]""",
+            # 模式7: var TEAMNAME = '综合医院团队'
             r"""var\s+TEAMNAME\s*=\s*['"]([^'"]+)['"]""",
+            # 模式8: <input name="teamName" value="中医医院团队">
+            r"""name\s*=\s*['"]teamName['"]\s+value\s*=\s*['"]([^'"]+)['"]""",
+            # 模式9: <input name="TEAMNAME" value="民族医院团队">
+            r"""name\s*=\s*['"]TEAMNAME['"]\s+value\s*=\s*['"]([^'"]+)['"]""",
+            # 模式10: 更通用的模式: 包含"team"和团队名称
+            r"""(?:team|团队|teamName|TEAMNAME)[^>]*?['"]([^'"]+)['"]""",
         ]
         
-        for pattern in team_patterns:
+        team_extracted = False
+        for i, pattern in enumerate(team_patterns, 1):
             team_m = re.search(pattern, html, re.IGNORECASE)
             if team_m:
                 self.team_name = team_m.group(1).strip()
+                logger.info(f"团队名称提取成功 (模式{i}): {self.team_name}")
+                team_extracted = True
                 break
+        
+        if not team_extracted:
+            logger.warning("团队名称提取失败，未找到匹配的模式")
 
     # ---- 登录 ----
 

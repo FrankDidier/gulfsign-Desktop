@@ -3724,6 +3724,41 @@ class GulfSignApp(tk.Tk):
         
         threading.Thread(target=worker, daemon=True).start()
     
+    def _check_login_status(self) -> Tuple[bool, str, str]:
+        """统一检查登录状态
+        
+        返回: (是否已登录, 状态消息, 详细信息)
+        """
+        # 方法1: 检查客户端logged_in属性
+        if hasattr(self.client, 'logged_in') and self.client.logged_in:
+            user_info = self._cfg.get("username", "未知用户")
+            org_info = self._cfg.get("org_name", "")
+            if org_info:
+                user_info = f"{user_info} ({org_info})"
+            return True, f"已登录: {user_info}", "客户端状态有效"
+        
+        # 方法2: 检查是否有有效的会话和Token
+        if hasattr(self.client, 'session') and self.client.session:
+            # 检查会话中是否有必要的Cookie
+            cookies = self.client.session.cookies
+            if cookies:
+                # 检查是否有看起来像认证Cookie的项
+                auth_cookies = [name for name in cookies.keys() 
+                              if any(keyword in name.lower() for keyword in ['auth', 'token', 'session', 'login'])]
+                if auth_cookies:
+                    return True, "检测到认证Cookie", f"Cookie: {', '.join(auth_cookies[:2])}"
+        
+        # 方法3: 检查配置中是否有机构代码（表示曾经成功登录过）
+        if self._cfg.get("org_code"):
+            return True, "配置中有机构代码", "可能已登录过或配置已保存"
+        
+        # 方法4: 检查增强登录变量中是否有账号和系统地址
+        if self.enhanced_account_var.get() and self.enhanced_url_var.get():
+            return False, "有账号信息但未执行登录", "请点击API登录或网页登录按钮"
+        
+        # 默认情况
+        return False, "未登录或会话已过期", "请使用API登录或网页登录"
+    
     def _perform_login_diagnosis(self) -> List[Tuple[str, bool, str]]:
         """执行诊断"""
         diagnostics = []
@@ -3882,11 +3917,9 @@ class GulfSignApp(tk.Tk):
             # 如果有警告信息但主要配置完整，仍然显示配置完整
             diagnostics.append(("配置完整性", True, "配置完整"))
         
-        # 4. 检查登录状态
-        if hasattr(self.client, 'logged_in') and self.client.logged_in:
-            diagnostics.append(("登录状态", True, "已登录"))
-        else:
-            diagnostics.append(("登录状态", False, "未登录"))
+        # 4. 检查登录状态 - 使用统一的检测函数
+        login_detected, login_message, login_details = self._check_login_status()
+        diagnostics.append(("登录状态", login_detected, login_message))
         
         return diagnostics
     
@@ -4101,20 +4134,9 @@ class GulfSignApp(tk.Tk):
                               "所有必需配置完整",
                               f"配置详情: {'; '.join(config_details)}"))
         
-        # 5. 检查登录状态
-        if hasattr(self.client, 'logged_in') and self.client.logged_in:
-            user_info = self._cfg.get("username", "未知用户")
-            org_info = self._cfg.get("org_name", "")
-            if org_info:
-                user_info = f"{user_info} ({org_info})"
-            
-            diagnostics.append(("登录状态", True, 
-                              f"已登录: {user_info}",
-                              f"会话有效"))
-        else:
-            diagnostics.append(("登录状态", False, 
-                              "未登录或会话已过期",
-                              "请使用API登录或网页登录"))
+        # 5. 检查登录状态 - 使用统一的检测函数
+        login_detected, login_message, login_details = self._check_login_status()
+        diagnostics.append(("登录状态", login_detected, login_message, login_details))
         
         return diagnostics
     
