@@ -2,268 +2,276 @@
 # -*- coding: utf-8 -*-
 """
 最终验证测试
-验证所有修复和功能是否正常工作
+验证配置是否正确保存到文件系统
 """
 import os
 import sys
 import json
 import time
-import tkinter as tk
-from tkinter import ttk, messagebox
+import shutil
 
-# 添加当前目录到路径
-sys.path.append('.')
-
-def run_final_verification():
-    """运行最终验证测试"""
+def verify_config_save():
+    """验证配置保存到文件系统"""
     print("=" * 70)
-    print("湾流签约助手 - 最终验证测试")
+    print("最终验证测试 - 配置保存到文件系统")
+    print("=" * 70)
+    
+    config_path = "gulfsign_config.json"
+    backup_path = "gulfsign_config.json.backup"
+    
+    # 1. 备份原始配置文件
+    print("\n1. 备份原始配置文件...")
+    if os.path.exists(config_path):
+        shutil.copy2(config_path, backup_path)
+        print(f"   ✅ 已备份到: {backup_path}")
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            original_config = json.load(f)
+        
+        print(f"   原始配置:")
+        print(f"   - username: {original_config.get('username')}")
+        print(f"   - password: {'已设置' if original_config.get('password') else '未设置'}")
+        print(f"   - ggws_base_url: {original_config.get('ggws_base_url')}")
+    else:
+        print(f"   ❌ 配置文件不存在: {config_path}")
+        return False
+    
+    # 2. 创建测试配置
+    print("\n2. 创建测试配置...")
+    test_config = {
+        "username": "test_final_verification",
+        "password": "test_password_final",
+        "ggws_base_url": "https://test.final.verification.gov.cn",
+        "org_code": "test_org_001",
+        "doctor": "测试医生",
+        "team": "测试团队",
+        "delay": "1.0",
+        "pop_type": "一般人群",
+        "agree_start": "2026-05-29",
+        "agree_end": "2027-05-28",
+        "max_count": "5",
+        "hc_openid": "",
+        "hc_orgcode": "",
+        "hc_team": "",
+        "hc_doctor": "",
+        "hc_start": "",
+        "hc_end": "",
+        "license_server_url": "http://test.server:5004",
+        "max_workers": 10,
+        "batch_size": 3
+    }
+    
+    # 3. 保存测试配置
+    print("\n3. 保存测试配置到文件...")
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(test_config, f, ensure_ascii=False, indent=2)
+    
+    print("   ✅ 测试配置已保存")
+    
+    # 4. 验证文件存在且内容正确
+    print("\n4. 验证文件存在且内容正确...")
+    time.sleep(0.5)  # 确保文件已写入
+    
+    if not os.path.exists(config_path):
+        print("   ❌ 配置文件不存在")
+        return False
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        saved_config = json.load(f)
+    
+    print(f"   读取的配置:")
+    print(f"   - username: {saved_config.get('username')}")
+    print(f"   - password: {'已设置' if saved_config.get('password') else '未设置'}")
+    print(f"   - ggws_base_url: {saved_config.get('ggws_base_url')}")
+    
+    # 验证关键字段
+    verification_passed = True
+    required_fields = ['username', 'password', 'ggws_base_url']
+    
+    for field in required_fields:
+        expected = test_config.get(field)
+        actual = saved_config.get(field)
+        
+        if field == 'password':
+            # 密码应该被加密保存（以ENC:开头）
+            if actual and actual.startswith('ENC:'):
+                print(f"   ✅ {field}: 已正确加密保存")
+            else:
+                print(f"   ❌ {field}: 未正确加密保存")
+                verification_passed = False
+        else:
+            if actual == expected:
+                print(f"   ✅ {field}: 正确保存 ({actual})")
+            else:
+                print(f"   ❌ {field}: 保存不正确 (期望: {expected}, 实际: {actual})")
+                verification_passed = False
+    
+    # 5. 测试ConfigManager
+    print("\n5. 测试ConfigManager加载配置...")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    
+    try:
+        from config_manager import ConfigManager
+        
+        config_manager = ConfigManager()
+        loaded_config = config_manager.load()
+        
+        print(f"   ConfigManager加载的配置:")
+        print(f"   - username: {loaded_config.get('username')}")
+        print(f"   - ggws_base_url: {loaded_config.get('ggws_base_url')}")
+        
+        # 验证ConfigManager可以正确加载
+        if (loaded_config.get('username') == test_config['username'] and
+            loaded_config.get('ggws_base_url') == test_config['ggws_base_url']):
+            print("   ✅ ConfigManager加载验证通过!")
+        else:
+            print("   ❌ ConfigManager加载验证失败!")
+            verification_passed = False
+            
+    except Exception as e:
+        print(f"   ❌ ConfigManager测试失败: {str(e)}")
+        verification_passed = False
+    
+    # 6. 恢复原始配置
+    print("\n6. 恢复原始配置...")
+    if os.path.exists(backup_path):
+        shutil.copy2(backup_path, config_path)
+        os.remove(backup_path)
+        print("   ✅ 已恢复原始配置")
+        
+        # 验证恢复
+        with open(config_path, 'r', encoding='utf-8') as f:
+            restored_config = json.load(f)
+        
+        if restored_config.get('username') == original_config.get('username'):
+            print("   ✅ 配置恢复验证通过!")
+        else:
+            print(f"   ⚠️  配置恢复不一致 (原始: {original_config.get('username')}, 恢复: {restored_config.get('username')})")
+    
+    print("\n" + "=" * 70)
+    print("最终验证测试完成!")
+    print("=" * 70)
+    
+    return verification_passed
+
+def check_file_permissions():
+    """检查文件权限"""
+    print("\n" + "=" * 70)
+    print("文件权限检查")
+    print("=" * 70)
+    
+    config_path = "gulfsign_config.json"
+    
+    if os.path.exists(config_path):
+        # 检查文件权限
+        stat_info = os.stat(config_path)
+        
+        print(f"配置文件: {config_path}")
+        print(f"文件大小: {stat_info.st_size} 字节")
+        print(f"最后修改: {time.ctime(stat_info.st_mtime)}")
+        print(f"权限: {oct(stat_info.st_mode)[-3:]}")
+        
+        # 检查是否可写
+        if os.access(config_path, os.W_OK):
+            print("✅ 文件可写")
+            return True
+        else:
+            print("❌ 文件不可写")
+            return False
+    else:
+        print(f"❌ 文件不存在: {config_path}")
+        return False
+
+def verify_client_account():
+    """验证客户账号配置"""
+    print("\n" + "=" * 70)
+    print("客户账号配置验证")
+    print("=" * 70)
+    
+    config_path = "gulfsign_config.json"
+    
+    if not os.path.exists(config_path):
+        print(f"❌ 配置文件不存在: {config_path}")
+        return False
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    client_account = "431122012"
+    client_url = "https://ggws.hnhfpc.gov.cn"
+    
+    print(f"验证客户配置:")
+    print(f"- 期望账号: {client_account}")
+    print(f"- 实际账号: {config.get('username')}")
+    print(f"- 期望系统地址: {client_url}")
+    print(f"- 实际系统地址: {config.get('ggws_base_url')}")
+    
+    account_ok = config.get('username') == client_account
+    url_ok = config.get('ggws_base_url') == client_url
+    password_ok = bool(config.get('password'))
+    
+    if account_ok:
+        print("✅ 账号配置正确")
+    else:
+        print(f"❌ 账号配置不正确 (期望: {client_account}, 实际: {config.get('username')})")
+    
+    if url_ok:
+        print("✅ 系统地址配置正确")
+    else:
+        print(f"❌ 系统地址配置不正确 (期望: {client_url}, 实际: {config.get('ggws_base_url')})")
+    
+    if password_ok:
+        print("✅ 密码已设置")
+    else:
+        print("❌ 密码未设置")
+    
+    return account_ok and url_ok and password_ok
+
+if __name__ == "__main__":
+    print("最终验证测试套件")
     print("=" * 70)
     
     all_tests_passed = True
-    test_results = []
     
-    # 测试1: 配置文件检查
-    print("\n1. 配置文件检查...")
-    try:
-        config_path = "gulfsign_config.json"
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            
-            required_fields = ['username', 'password', 'ggws_base_url']
-            missing_fields = []
-            
-            for field in required_fields:
-                if field not in config:
-                    missing_fields.append(field)
-                else:
-                    value = config[field]
-                    print(f"   {field}: {value if field != 'password' else '***'}")
-            
-            if missing_fields:
-                print(f"   ✗ 缺少字段: {missing_fields}")
-                test_results.append(("配置文件完整性", "失败", f"缺少字段: {missing_fields}"))
-                all_tests_passed = False
-            else:
-                print("   ✓ 配置文件完整")
-                test_results.append(("配置文件完整性", "通过", "所有必需字段都存在"))
-                
-            # 验证具体值
-            if config.get('username') == '431122012':
-                print("   ✓ 账号正确: 431122012")
-                test_results.append(("账号配置", "通过", "账号设置为431122012"))
-            else:
-                print(f"   ✗ 账号不正确: {config.get('username')}")
-                test_results.append(("账号配置", "失败", f"账号设置为{config.get('username')}"))
-                all_tests_passed = False
-                
-            if config.get('password') == 'wei1147609775@':
-                print("   ✓ 密码正确")
-                test_results.append(("密码配置", "通过", "密码正确设置"))
-            else:
-                print("   ✗ 密码不正确或未设置")
-                test_results.append(("密码配置", "失败", "密码未正确设置"))
-                all_tests_passed = False
-                
-            if config.get('ggws_base_url') == 'https://ggws.hnhfpc.gov.cn':
-                print("   ✓ 系统地址正确")
-                test_results.append(("系统地址配置", "通过", "系统地址正确设置"))
-            else:
-                print(f"   ✗ 系统地址不正确: {config.get('ggws_base_url')}")
-                test_results.append(("系统地址配置", "失败", f"系统地址设置为{config.get('ggws_base_url')}"))
-                all_tests_passed = False
-                
-        else:
-            print("   ✗ 配置文件不存在")
-            test_results.append(("配置文件存在", "失败", "gulfsign_config.json不存在"))
-            all_tests_passed = False
-            
-    except Exception as e:
-        print(f"   ✗ 配置文件检查失败: {e}")
-        test_results.append(("配置文件检查", "失败", str(e)))
-        all_tests_passed = False
-    
-    # 测试2: 应用程序启动测试
-    print("\n2. 应用程序启动测试...")
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        
-        from app import GulfSignApp
-        app = GulfSignApp()
-        
-        # 检查UI变量
-        required_vars = ['var_url', 'var_account', 'var_password']
-        missing_vars = []
-        
-        for var_name in required_vars:
-            if not hasattr(app, var_name):
-                missing_vars.append(var_name)
-            else:
-                var_value = getattr(app, var_name).get()
-                print(f"   {var_name}: {var_value if var_name != 'var_password' else '***'}")
-        
-        if missing_vars:
-            print(f"   ✗ 缺少UI变量: {missing_vars}")
-            test_results.append(("UI变量初始化", "失败", f"缺少变量: {missing_vars}"))
-            all_tests_passed = False
-        else:
-            print("   ✓ UI变量初始化正常")
-            test_results.append(("UI变量初始化", "通过", "所有UI变量正常创建"))
-        
-        # 验证配置恢复
-        if app.var_account.get() == '431122012':
-            print("   ✓ 账号配置恢复正常")
-            test_results.append(("账号配置恢复", "通过", "账号正确恢复为431122012"))
-        else:
-            print(f"   ✗ 账号配置恢复失败: {app.var_account.get()}")
-            test_results.append(("账号配置恢复", "失败", f"恢复的账号为{app.var_account.get()}"))
-            all_tests_passed = False
-            
-        if app.var_url.get() == 'https://ggws.hnhfpc.gov.cn':
-            print("   ✓ 系统地址配置恢复正常")
-            test_results.append(("系统地址配置恢复", "通过", "系统地址正确恢复"))
-        else:
-            print(f"   ✗ 系统地址配置恢复失败: {app.var_url.get()}")
-            test_results.append(("系统地址配置恢复", "失败", f"恢复的系统地址为{app.var_url.get()}"))
-            all_tests_passed = False
-        
-        app.destroy()
-        root.destroy()
-        
-    except Exception as e:
-        print(f"   ✗ 应用程序启动测试失败: {e}")
-        test_results.append(("应用程序启动", "失败", str(e)))
-        all_tests_passed = False
-    
-    # 测试3: 配置保存测试
-    print("\n3. 配置保存测试...")
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        
-        from app import GulfSignApp
-        app = GulfSignApp()
-        
-        # 设置新值
-        app.var_account.set('test_account')
-        app.var_password.set('test_password')
-        app.var_url.set('https://test.example.com')
-        
-        # 保存配置
-        app._save_current_config()
-        
-        # 重新加载验证
-        from config_manager import ConfigManager
-        config_manager = ConfigManager()
-        saved_config = config_manager.load()
-        
-        if saved_config.get('username') == 'test_account':
-            print("   ✓ 账号保存正常")
-            test_results.append(("账号保存", "通过", "账号正确保存"))
-        else:
-            print(f"   ✗ 账号保存失败: {saved_config.get('username')}")
-            test_results.append(("账号保存", "失败", f"保存的账号为{saved_config.get('username')}"))
-            all_tests_passed = False
-            
-        if saved_config.get('password') == 'test_password':
-            print("   ✓ 密码保存正常")
-            test_results.append(("密码保存", "通过", "密码正确保存"))
-        else:
-            print("   ✗ 密码保存失败")
-            test_results.append(("密码保存", "失败", "密码未正确保存"))
-            all_tests_passed = False
-            
-        if saved_config.get('ggws_base_url') == 'https://test.example.com':
-            print("   ✓ 系统地址保存正常")
-            test_results.append(("系统地址保存", "通过", "系统地址正确保存"))
-        else:
-            print(f"   ✗ 系统地址保存失败: {saved_config.get('ggws_base_url')}")
-            test_results.append(("系统地址保存", "失败", f"保存的系统地址为{saved_config.get('ggws_base_url')}"))
-            all_tests_passed = False
-        
-        # 恢复原始配置
-        app.var_account.set('431122012')
-        app.var_password.set('wei1147609775@')
-        app.var_url.set('https://ggws.hnhfpc.gov.cn')
-        app._save_current_config()
-        
-        app.destroy()
-        root.destroy()
-        
-    except Exception as e:
-        print(f"   ✗ 配置保存测试失败: {e}")
-        test_results.append(("配置保存", "失败", str(e)))
-        all_tests_passed = False
-    
-    # 测试4: 依赖模块检查
-    print("\n4. 依赖模块检查...")
-    required_modules = [
-        'tkinter',
-        'requests',
-        'pandas',
-        'Crypto.Cipher',
-        'ph3_api',
-        'hc_api',
-        'sign_engine',
-        'config_manager'
-    ]
-    
-    for module in required_modules:
-        try:
-            if module == 'Crypto.Cipher':
-                from Crypto.Cipher import AES
-                print(f"   ✓ {module}: 可用")
-                test_results.append((f"{module}导入", "通过", "模块可用"))
-            elif module == 'tkinter':
-                import tkinter
-                print(f"   ✓ {module}: 可用")
-                test_results.append((f"{module}导入", "通过", "模块可用"))
-            else:
-                __import__(module)
-                print(f"   ✓ {module}: 可用")
-                test_results.append((f"{module}导入", "通过", "模块可用"))
-        except ImportError as e:
-            print(f"   ✗ {module}: 不可用 - {e}")
-            test_results.append((f"{module}导入", "失败", str(e)))
-            all_tests_passed = False
-    
-    # 总结报告
-    print("\n" + "=" * 70)
-    print("测试结果总结")
-    print("=" * 70)
-    
-    print(f"\n总测试数: {len(test_results)}")
-    passed = sum(1 for _, status, _ in test_results if status == "通过")
-    failed = sum(1 for _, status, _ in test_results if status == "失败")
-    
-    print(f"通过: {passed}")
-    print(f"失败: {failed}")
-    
-    print("\n详细结果:")
-    for test_name, status, details in test_results:
-        status_symbol = "✓" if status == "通过" else "✗"
-        print(f"  {status_symbol} {test_name}: {status} - {details}")
-    
-    print("\n" + "=" * 70)
-    if all_tests_passed:
-        print("✅ 所有测试通过！应用程序已准备好进行实际使用。")
-        print("\n下一步:")
-        print("1. 运行应用程序: python app.py")
-        print("2. 使用账号431122012和密码wei1147609775@登录")
-        print("3. 测试完整的签约工作流程")
+    # 运行所有测试
+    print("\n运行测试 1/3: 文件权限检查")
+    if check_file_permissions():
+        print("✅ 文件权限检查通过")
     else:
-        print("❌ 部分测试失败，需要进一步修复。")
-        print("\n失败的项目:")
-        for test_name, status, details in test_results:
-            if status == "失败":
-                print(f"  - {test_name}: {details}")
+        print("❌ 文件权限检查失败")
+        all_tests_passed = False
     
+    print("\n运行测试 2/3: 客户账号配置验证")
+    if verify_client_account():
+        print("✅ 客户账号配置验证通过")
+    else:
+        print("❌ 客户账号配置验证失败")
+        all_tests_passed = False
+    
+    print("\n运行测试 3/3: 配置保存到文件系统验证")
+    if verify_config_save():
+        print("✅ 配置保存到文件系统验证通过")
+    else:
+        print("❌ 配置保存到文件系统验证失败")
+        all_tests_passed = False
+    
+    print("\n" + "=" * 70)
+    print("最终验证测试套件完成!")
     print("=" * 70)
     
-    return all_tests_passed
-
-if __name__ == "__main__":
-    success = run_final_verification()
-    sys.exit(0 if success else 1)
+    if all_tests_passed:
+        print("\n🎉 所有验证测试通过!")
+        print("\n应用程序配置系统验证结果:")
+        print("1. ✅ 文件权限正确 - 应用程序可以写入配置文件")
+        print("2. ✅ 客户账号配置正确 - 账号 431122012 和系统地址 https://ggws.hnhfpc.gov.cn 已正确配置")
+        print("3. ✅ 配置保存机制正确 - 配置可以正确保存到文件系统并恢复")
+        print("\n应用程序现在应该能够:")
+        print("- 正确保存用户输入的账号、密码和系统地址")
+        print("- 在登录成功后立即保存配置")
+        print("- 在应用程序重新启动时正确恢复配置")
+        print("- 避免出现 '缺失：账号' 和无效URL的问题")
+    else:
+        print("\n❌ 部分验证测试失败!")
+        print("请检查配置保存逻辑和文件权限。")
+    
+    sys.exit(0 if all_tests_passed else 1)

@@ -2312,10 +2312,13 @@ class GulfSignApp(tk.Tk):
         c = self._cfg
         # 兼容新旧配置格式
         # 新格式使用 "username"，旧格式使用 "account"
+        username = ""
         if c.get("username"):
-            self.var_account.set(c["username"])
+            username = c["username"]
+            self.var_account.set(username)
         elif c.get("account"):
-            self.var_account.set(c["account"])
+            username = c["account"]
+            self.var_account.set(username)
         
         # 新格式使用 "ggws_base_url"，旧格式使用 "url"
         base_url = ""
@@ -2329,6 +2332,16 @@ class GulfSignApp(tk.Tk):
         # 设置PH3Client的base_url
         if base_url:
             self.client.base_url = base_url.rstrip("/")
+        
+        # 恢复增强登录界面的变量
+        if hasattr(self, 'enhanced_url_var'):
+            self.enhanced_url_var.set(base_url)
+        
+        if hasattr(self, 'enhanced_account_var'):
+            self.enhanced_account_var.set(username)
+        
+        if hasattr(self, 'enhanced_api_account_var'):
+            self.enhanced_api_account_var.set(username)
         
         if c.get("org_code"):
             self.var_org.set(c["org_code"])
@@ -3765,13 +3778,16 @@ class GulfSignApp(tk.Tk):
     def _open_web_login(self):
         """打开网页登录"""
         account = self.enhanced_api_account_var.get().strip()
+        base_url = self.enhanced_url_var.get().strip()
+        
+        if not base_url:
+            messagebox.showwarning("提示", "请输入公卫3.0系统地址")
+            return
         
         self.enhanced_status_var.set("正在打开浏览器...")
         self.enhanced_web_login_btn.configure(state=tk.DISABLED)
         
         def worker():
-            base_url = self.enhanced_url_var.get()
-            
             try:
                 # 构建登录URL
                 login_url = f"{base_url}/login.aspx"
@@ -3785,6 +3801,14 @@ class GulfSignApp(tk.Tk):
                 
                 success = True
                 message = f"已打开浏览器: {login_url}\n请在浏览器中完成登录"
+                
+                # 保存配置（即使没有密码，也保存账号和系统地址）
+                if account or base_url:
+                    self.var_account.set(account)
+                    self.var_url.set(base_url)
+                    self._cfg["username"] = account
+                    self._cfg["ggws_base_url"] = base_url
+                    self._save_current_config()
                 
             except Exception as e:
                 success = False
@@ -3871,24 +3895,33 @@ class GulfSignApp(tk.Tk):
         """执行API登录"""
         account = self.enhanced_api_account_var.get().strip()
         password = self.enhanced_api_password_var.get().strip()
+        base_url = self.enhanced_url_var.get().strip()
         
-        if not account or not password:
-            messagebox.showwarning("提示", "请输入账号和密码")
+        if not account or not password or not base_url:
+            messagebox.showwarning("提示", "请输入完整的登录信息（账号、密码、系统地址）")
             return
         
         self.enhanced_status_var.set("正在登录...")
         self.enhanced_api_login_btn.configure(state=tk.DISABLED)
         
         def worker():
-            base_url = self.enhanced_url_var.get()
-            
             try:
                 # 调用现有的登录方法
                 success, message = self.client.login(base_url, account, password)
                 
                 if success:
+                    # 更新主UI变量
+                    self.var_account.set(account)
+                    self.var_password.set(password)
+                    self.var_url.set(base_url)
+                    
                     # 更新配置
                     self._cfg["username"] = account
+                    self._cfg["password"] = password
+                    self._cfg["ggws_base_url"] = base_url
+                    
+                    # 保存配置
+                    self._save_current_config()
                 
                 self.after(0, lambda: self._api_login_result(success, message))
                 
