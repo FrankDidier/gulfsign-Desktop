@@ -512,15 +512,16 @@ class HealthCardClient:
                 return False, "注册失败(Wechatcode可能已过期或人脸验证被拒)"
             if not body:
                 return False, "注册失败(空响应)"
+            # 修复: 之前 errno!=0 / 非 JSON 都被乐观当作 "提交成功", 误导 UI.
+            # 现在: 只接受明确的 errno==0 / success==True 作为成功.
             try:
                 data = json.loads(body)
-                if data.get("errno") == 0 or data.get("success"):
-                    return True, "健康卡注册成功"
-                return True, "注册已提交: %s" % body[:120]
             except json.JSONDecodeError:
-                if len(body) > 10:
-                    return True, "注册已提交(非JSON响应)"
-                return False, "注册失败: %s" % body[:120]
+                return False, "注册失败 (非JSON响应): %s" % body[:160]
+            if data.get("errno") == 0 or data.get("success") is True:
+                return True, "健康卡注册成功"
+            err = data.get("errmsg") or data.get("msg") or body[:160]
+            return False, "注册失败: %s" % err
         except Exception as e:
             return False, "注册异常: %s" % str(e)
 

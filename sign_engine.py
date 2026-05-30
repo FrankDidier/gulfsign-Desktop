@@ -495,7 +495,19 @@ class SigningEngine:
             return result
 
         gender = card.gender or "1"
-        phone = card.phone or "13800000000"
+        # 之前: 默认 "13800000000" 占位电话直接进入生产健康卡接口.
+        # 现在: 缺少真实电话时记一条警告 (上游应配置真实电话).
+        phone = card.phone
+        if not phone:
+            phone = "13800000000"
+            try:
+                log(
+                    "  ⚠ 居民缺少手机号, 暂以占位号码 13800000000 提交 — "
+                    "请补充真实电话以避免数据被退回",
+                    "warn",
+                )
+            except Exception:
+                pass
 
         ok, msg = self.hc.create_resident_contract(
             person_id=person_id,

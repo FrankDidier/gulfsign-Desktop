@@ -36,7 +36,7 @@ from proxy_capture import (
 )
 from license_client import LicenseClient
 from config_manager import ConfigManager
-from batch_processor import BatchProcessor
+from batch_processor import BatchProcessor, SuccessLogger
 
 VERSION = "3.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
@@ -524,6 +524,13 @@ class GulfSignApp(tk.Tk):
         self.license_client = LicenseClient()
         self.config_manager = ConfigManager()
         self.batch_processor = BatchProcessor()
+        # SuccessLogger 在每次签约结果回调里写入 logs/成功 与 logs/失败,
+        # 以前从未被生产路径调用过, 导致 "Excel 日志" 形同虚设。
+        try:
+            self.success_logger: Optional[SuccessLogger] = SuccessLogger()
+        except Exception as e:
+            print(f"[init] SuccessLogger 初始化失败 (Excel 日志将被禁用): {e}")
+            self.success_logger = None
         
         self.patients: List[Patient] = []
         self.selected_ids: set = set()
@@ -2245,55 +2252,63 @@ class GulfSignApp(tk.Tk):
 
     def _on_license_verify(self):
         """验证许可证按钮点击事件"""
+        # Snapshot ALL Tk variables on the main thread before spawning the
+        # worker — `verify_license` returns a `LicenseResponse` dataclass,
+        # so the old `result["success"]` indexing always raised TypeError.
         username = self.var_license_user.get().strip()
         password = self.var_license_password.get().strip()
-        
+        server_url = self.var_license_server.get().strip()
+
         if not username or not password:
             self._license_log("请输入用户名和密码", "err")
             self.var_license_status.set("验证失败")
             self.lbl_license_status.configure(style="Error.TLabel")
             return
-        
+
         self._license_log(f"正在验证许可证: {username}", "info")
         self.var_license_status.set("验证中...")
         self.lbl_license_status.configure(style="Info.TLabel")
         self.btn_license_verify.configure(state=tk.DISABLED)
-        
+
         def verify_thread():
             try:
-                # 设置服务器地址
-                server_url = self.var_license_server.get().strip()
                 if server_url:
-                    # 更新配置中的服务器地址
                     self.license_client.config.server_url = server_url
-                
-                # 验证许可证
                 result = self.license_client.verify_license(username, password)
-                
-                if result["success"]:
-                    self.after(0, lambda: self._license_log(f"许可证验证成功: {result.get('message', '')}", "ok"))
-                    self.after(0, lambda: self.var_license_status.set("验证成功"))
-                    self.after(0, lambda: self.lbl_license_status.configure(style="Success.TLabel"))
-                    
-                    # 更新配置
-                    self._cfg["auth"] = {"user": username, "password": password}
-                    self._cfg["license_server_url"] = server_url
-                    save_config(self._cfg)
-                else:
-                    self.after(0, lambda: self._license_log(f"许可证验证失败: {result.get('message', '')}", "err"))
-                    self.after(0, lambda: self.var_license_status.set("验证失败"))
-                    self.after(0, lambda: self.lbl_license_status.configure(style="Error.TLabel"))
-                    
+                # LicenseResponse is a dataclass — use attribute access.
+                ok = bool(getattr(result, "success", False))
+                msg = getattr(result, "message", "") or ""
+                self._safe_after(lambda: self._license_verify_finish(
+                    ok, msg, username, password, server_url
+                ))
             except Exception as e:
-                self.after(0, lambda: self._license_log(f"验证过程中发生错误: {str(e)}", "err"))
-                self.after(0, lambda: self.var_license_status.set("验证失败"))
-                self.after(0, lambda: self.lbl_license_status.configure(style="Error.TLabel"))
-                
-            finally:
-                self.after(0, lambda: self.btn_license_verify.configure(state=tk.NORMAL))
-        
-        # 在新线程中执行验证
+                self._safe_after(lambda: self._license_verify_finish(
+                    False, f"验证过程中发生错误: {str(e)}",
+                    username, password, server_url,
+                ))
+
         threading.Thread(target=verify_thread, daemon=True).start()
+
+    def _license_verify_finish(self, ok: bool, msg: str,
+                               username: str, password: str,
+                               server_url: str):
+        """Main-thread continuation for license verification."""
+        self.btn_license_verify.configure(state=tk.NORMAL)
+        if ok:
+            self._license_log(f"许可证验证成功: {msg}", "ok")
+            self.var_license_status.set("验证成功")
+            self.lbl_license_status.configure(style="Success.TLabel")
+            self._cfg["auth"] = {"user": username, "password": password}
+            if server_url:
+                self._cfg["license_server_url"] = server_url
+            try:
+                save_config(self._cfg)
+            except Exception as e:
+                print(f"[license] save_config warning: {e}")
+        else:
+            self._license_log(f"许可证验证失败: {msg}", "err")
+            self.var_license_status.set("验证失败")
+            self.lbl_license_status.configure(style="Error.TLabel")
 
     def _on_save_license_config(self):
         """保存许可证配置按钮点击事件"""
@@ -2546,37 +2561,58 @@ class GulfSignApp(tk.Tk):
         self.btn_login.configure(state=tk.NORMAL)
         self.var_login_status.set(msg)
 
-        if ok:
-            self.lbl_login_status.configure(style="Success.TLabel")
-            self._log("✓ %s" % msg, "ok")
-
-            if self.client.org_code and not self.var_org.get():
-                self.var_org.set(self.client.org_code)
-            if self.client.doctor_name and not self.var_doctor.get():
-                self.var_doctor.set(self.client.doctor_name)
-            if self.client.team_name and not self.var_team.get():
-                self.var_team.set(self.client.team_name)
-
-            self._save_current_config()
-            self._start_capability_router_check()
-        else:
+        if not ok:
             self.lbl_login_status.configure(style="Error.TLabel")
             self._log("✗ %s" % msg, "err")
+            return
 
-    def _start_capability_router_check(self):
-        self.var_route_mode.set("能力路由: 检测中...")
+        # 服务器在 SSO 之外强制要求二维码扫描时, login() 也会返回 ok=True
+        # (因为 Token 已下发) — 这里必须显式区分, 否则后续会把半成品会话
+        # 当作完整登录, 触发查询/签约甚至能力探测.
+        if getattr(self.client, "qr_pending", False):
+            self.lbl_login_status.configure(style="Error.TLabel")
+            self._log("⚠ %s" % msg, "warn")
+            messagebox.showwarning(
+                "需要二维码验证",
+                "API 登录已下发 Token, 但服务器仍在等待二维码扫描.\n\n"
+                "请使用 [增强登录] 标签页中的 [跳转到3.0系统登录] 按钮,\n"
+                "在浏览器中完成扫码, 然后点 [同步配置]."
+            )
+            return
+
+        # 真·登录成功
+        self.lbl_login_status.configure(style="Success.TLabel")
+        self._log("✓ %s" % msg, "ok")
+
+        if self.client.org_code and not self.var_org.get():
+            self.var_org.set(self.client.org_code)
+        if self.client.doctor_name and not self.var_doctor.get():
+            self.var_doctor.set(self.client.doctor_name)
+        if self.client.team_name and not self.var_team.get():
+            self.var_team.set(self.client.team_name)
+
+        self._save_current_config()
+
+        # 安全模式: 只读探测 (统计 status 数量), 不再创建/确认测试合同。
+        # 创建-确认-删除流程曾经在每次登录时自动执行, 会在生产数据上留下
+        # 测试合同与签约记录, 已停用; 如需诊断接口请使用专用按钮 (TODO).
+        self._start_capability_router_check_readonly()
+
+    def _start_capability_router_check_readonly(self):
+        """只读版本能力路由探测: 仅统计 status 0/5/6 的数量,
+        绝不创建或修改任何居民数据。"""
+        self.var_route_mode.set("能力路由: 检测中... (只读)")
         self.lbl_route_mode.configure(style="RouteUnknown.TLabel")
-        self._log("能力路由检测: 开始（使用临时测试合同）", "info")
+        self._log("能力路由检测: 开始 (只读模式 — 不会写入生产)", "info")
 
         def worker():
             profile = {
-                "mode": "blocked",
-                "reason": "当前权限下未发现直生效通道",
+                "mode": "readonly",
+                "reason": "只读探测 — 已禁用产生测试合同的写入路径",
                 "status0_total": 0,
                 "status5_total": 0,
                 "status6_total": 0,
             }
-            temp_cc = ""
             try:
                 _, t0 = self.client.query_patients(status="0", page=1)
                 _, t5 = self.client.query_patients(status="5", page=1)
@@ -2584,44 +2620,15 @@ class GulfSignApp(tk.Tk):
                 profile["status0_total"] = t0
                 profile["status5_total"] = t5
                 profile["status6_total"] = t6
-
                 if t6 > 0:
                     profile["mode"] = "doctor_only"
-                    profile["reason"] = "可确认居民申请(6->0)，医生申请仍需外部通道"
-
-                pool, _ = self.client.query_patients(status="", page=1)
-                target = next((p for p in pool if not p.contract_code), None)
-                if target:
-                    r = self.client.initiate_signing(
-                        person_id=target.person_id,
-                        agreement_start="20260101",
-                        agreement_end="20261231",
-                        period="1",
-                    )
-                    if r.success and r.contract_code:
-                        temp_cc = r.contract_code
-                        r2 = self.client.confirm_signing(
-                            person_id=target.person_id,
-                            contract_code=r.contract_code,
-                            name=target.name,
-                        )
-                        if r2.success:
-                            profile["mode"] = "direct"
-                            profile["reason"] = "检测到医生申请可直接生效"
-                        else:
-                            if profile["mode"] == "blocked":
-                                profile["mode"] = "doctor_only"
-                            profile["reason"] = "医生申请不可直生效，建议接力包/高权限通道"
+                    profile["reason"] = "可确认居民申请(6->0); 直生效通道未在只读模式探测"
             except Exception as e:
                 profile["mode"] = "blocked"
-                profile["reason"] = "检测异常: %s" % str(e)
-            finally:
-                if temp_cc:
-                    try:
-                        self.client.delete_signing(temp_cc)
-                    except Exception:
-                        pass
-            self.after(0, lambda: self._finish_capability_router_check(profile))
+                profile["reason"] = "只读探测异常: %s" % str(e)
+            self._safe_after(
+                lambda: self._finish_capability_router_check(profile)
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2760,6 +2767,13 @@ class GulfSignApp(tk.Tk):
                     if self._stop_event.is_set():
                         break
                     pids = [m.person_id for m in batch]
+                    # 优先使用配置中真实的服务电话, 退回时仅以默认占位符作 fallback
+                    # (服务端拒绝空值, 但占位符会污染真实数据 — 由下层告警).
+                    contact_phone = (
+                        self._cfg.get("contact_phone", "")
+                        or self._cfg.get("yslxdh", "")
+                        or ""
+                    )
                     t_start = time.time()
                     ok, msg2, created = self.client.family_batch_initiate(
                         person_ids=pids,
@@ -2769,7 +2783,7 @@ class GulfSignApp(tk.Tk):
                         service_type=pop_code,
                         agreement_start=agree_start,
                         agreement_end=agree_end,
-                        contact_phone="13800000000",
+                        contact_phone=contact_phone,
                     )
                     elapsed = time.time() - t_start
                     code_map = {c["person_id"]: c for c in created}
@@ -3343,6 +3357,7 @@ class GulfSignApp(tk.Tk):
             self._sign_success += 1
             self._log("  ✓ %s 已签约 (%.1f秒)" % (label, result.elapsed), "ok")
             tag = "signed_ok"
+            self._log_sign_result(result, status="signed")
         elif result.success and result.step == "initiate":
             self._sign_success += 1
             self._log(
@@ -3350,6 +3365,7 @@ class GulfSignApp(tk.Tk):
                 "warn",
             )
             tag = "signed_ok"
+            self._log_sign_result(result, status="initiated_pending_confirm")
         else:
             self._sign_fail += 1
             step_label = {
@@ -3361,6 +3377,7 @@ class GulfSignApp(tk.Tk):
                 "err",
             )
             tag = "signed_fail"
+            self._log_sign_result(result, status="failed", step_label=step_label)
 
         if result.person_id in children:
             self.tree.item(result.person_id, tags=(tag,))
@@ -3375,6 +3392,50 @@ class GulfSignApp(tk.Tk):
                 self._sign_success, self._sign_fail, speed
             )
         )
+
+    def _log_sign_result(self, result: SignResult, status: str,
+                         step_label: str = ""):
+        """Persist one batch-sign outcome into the Excel logs.
+
+        Success and "initiated, pending confirm" go to logs/成功/...
+        Failures go to logs/失败/... so the "全面" reporting actually
+        contains both sides instead of dropping failures on the floor.
+        """
+        if not getattr(self, "success_logger", None):
+            return
+        account = (
+            self.var_account.get().strip()
+            or self._cfg.get("username", "")
+            or "unknown"
+        )
+        record = {
+            "person_id": result.person_id or "",
+            "name": result.name or "",
+            "contract_code": result.contract_code or "",
+            "step": result.step or "",
+            "status": status,
+            "elapsed": getattr(result, "elapsed", 0.0),
+            "doctor": self.var_doctor.get(),
+            "team": self.var_team.get(),
+            "org_code": self.var_org.get(),
+            "agree_start": self.var_agree_start.get(),
+            "agree_end": self.var_agree_end.get(),
+        }
+        try:
+            if status == "failed":
+                self.success_logger.log_failure(
+                    account=account,
+                    result_data=record,
+                    error=f"[{step_label}] {result.error or ''}",
+                )
+            else:
+                self.success_logger.log_success(
+                    account=account,
+                    result_data=record,
+                )
+        except Exception as e:
+            # Don't let logging failures break the signing flow.
+            print(f"[log_sign_result] swallowed: {e}")
 
     def _signing_finished(self):
         self._signing = False
@@ -3811,10 +3872,11 @@ class GulfSignApp(tk.Tk):
             org_info = self._cfg.get("org_name", "") or getattr(client, "org_name", "")
             if org_info:
                 user_info = f"{user_info} ({org_info})"
-            # 即使 logged_in，如果 org_code 还没拿到也算 "登录但未同步"
+            # 即便 logged_in, 没有 org_code 也无法做查询/签约, 所以判为 "未就绪"
+            # (返回 False), 让上层 UI 不要把它当作可用会话.
             if not (self._cfg.get("org_code") or getattr(client, "org_code", "")):
                 return (
-                    True,
+                    False,
                     f"已登录但缺少机构信息: {user_info}",
                     "请点击 [同步配置] 获取机构代码",
                 )
@@ -4378,41 +4440,58 @@ class GulfSignApp(tk.Tk):
             messagebox.showerror("错误", message)
     
     def _sync_login_configuration(self):
-        """同步配置 - 从PH3Client会话中提取机构信息"""
+        """同步配置 - 从浏览器登录后的 PH3 会话中提取机构信息,
+        并把 PH3Client 提升为 fully_authenticated。"""
         self.enhanced_status_var.set("正在同步配置信息...")
         self.enhanced_sync_btn.configure(state=tk.DISABLED)
         
         def worker():
             try:
-                # 获取当前页面HTML (网络IO在 worker 线程)
                 current_page_html = self._get_current_page_html()
-                
                 if not current_page_html:
                     self._safe_after(lambda: self._sync_login_failed(
                         "无法获取当前页面，请确保已在浏览器中登录"
                     ))
                     return
                 
-                # 从HTML中提取机构信息
+                # 让 PH3Client 自己解析 token 与用户信息 — 这是登录正常路径
+                # 复用同样的解析器，确保后续 query/sign 使用的是真实会话状态。
+                token_ok = False
+                try:
+                    token_ok = self.client._extract_tokens(current_page_html)
+                except Exception as e:
+                    print(f"[sync] _extract_tokens raised: {e}")
+                try:
+                    self.client._extract_user_info(current_page_html)
+                except Exception as e:
+                    print(f"[sync] _extract_user_info raised: {e}")
+                # 若客户端没拿到 org_code, 尝试拉取并下钻 org tree
+                if not getattr(self.client, "org_code", ""):
+                    try:
+                        orgs = self.client.get_org_tree("0")
+                        if orgs:
+                            self.client._drill_org_tree(orgs)
+                    except Exception as e:
+                        print(f"[sync] org_tree drill failed: {e}")
+
                 extracted = self._extract_org_info_from_html(current_page_html)
-                
-                # 如果机构代码为空，回退到客户端已有的字段
-                if not extracted.get("org_code"):
-                    if getattr(self.client, "org_code", ""):
-                        extracted["org_code"] = self.client.org_code
-                    if getattr(self.client, "org_name", ""):
-                        extracted["org_name"] = self.client.org_name
-                    if getattr(self.client, "doctor_name", ""):
-                        extracted["doctor_name"] = self.client.doctor_name
-                    if getattr(self.client, "team_name", ""):
-                        extracted["team_name"] = self.client.team_name
-                
+                # 客户端的 org/doctor/team 优先 (它们来自真实 SSO 解析)
+                for src_attr, key in (
+                    ("org_code", "org_code"),
+                    ("org_name", "org_name"),
+                    ("doctor_name", "doctor_name"),
+                    ("team_name", "team_name"),
+                ):
+                    val = getattr(self.client, src_attr, "")
+                    if val:
+                        extracted[key] = val
                 extracted["synced_at"] = datetime.now().isoformat()
                 extracted["extraction_method"] = "actual_session"
+                extracted["_token_extracted"] = bool(token_ok)
                 
-                # All UI writes + config save run on main thread
-                self._safe_after(lambda: self._sync_apply_and_complete(extracted))
-                
+                self._safe_after(
+                    lambda: self._sync_apply_and_complete(extracted)
+                )
             except Exception as e:
                 error_msg = f"同步配置失败: {str(e)}"
                 print(f"❌ {error_msg}")
@@ -4421,10 +4500,43 @@ class GulfSignApp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _sync_apply_and_complete(self, extracted: Dict[str, Any]):
-        """Main-thread continuation for `_sync_login_configuration`."""
+        """Main-thread continuation for `_sync_login_configuration`.
+
+        Critically: if extraction yielded a real org_code, promote the
+        PH3Client to a fully-authenticated state and mirror values into
+        the 主界面 Tk variables so [查询] becomes immediately usable.
+        """
         try:
             self._cfg.update(extracted)
             self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
+
+            org_code = (extracted.get("org_code") or "").strip()
+            if org_code:
+                # 同步成功 → 该会话已通过完整鉴权
+                try:
+                    self.client.logged_in = True
+                    self.client.qr_pending = False
+                    if extracted.get("org_code"):
+                        self.client.org_code = extracted["org_code"]
+                    if extracted.get("org_name"):
+                        self.client.org_name = extracted["org_name"]
+                    if extracted.get("doctor_name"):
+                        self.client.doctor_name = extracted["doctor_name"]
+                    if extracted.get("team_name"):
+                        self.client.team_name = extracted["team_name"]
+                except Exception as e:
+                    print(f"[sync] could not promote client state: {e}")
+
+                # 镜像到主界面查询面板的输入框 (查询/签约依赖这些 Tk 变量)
+                try:
+                    self.var_org.set(org_code)
+                    if extracted.get("doctor_name"):
+                        self.var_doctor.set(extracted["doctor_name"])
+                    if extracted.get("team_name"):
+                        self.var_team.set(extracted["team_name"])
+                except Exception as e:
+                    print(f"[sync] could not mirror to main UI: {e}")
+
             self._save_current_config()
         except Exception as e:
             print(f"[sync] apply warning: {e}")

@@ -897,7 +897,7 @@ class PH3Client:
             pass
         # endregion
         
-        if not self.logged_in:
+        if not self.logged_in or self.qr_pending:
             return [], 0
 
         oc = org_code or self.org_code
@@ -1138,6 +1138,8 @@ class PH3Client:
         """
         if not self.logged_in:
             return [], 0, "未登录"
+        if self.qr_pending:
+            return [], 0, "登录不完整: 需要二维码验证"
         if not sfzh and not name:
             return [], 0, "身份证号或姓名至少填一个"
 
@@ -1240,7 +1242,7 @@ class PH3Client:
         返回每条记录: {contract_code, status_text, agreement_start,
         agreement_end, doctor}
         """
-        if not self.logged_in:
+        if not self.logged_in or self.qr_pending:
             return []
         try:
             resp = self.session.get(
@@ -1363,6 +1365,11 @@ class PH3Client:
     ) -> SignResult:
         if not self.logged_in:
             return SignResult(False, person_id, error="未登录", step="initiate")
+        if self.qr_pending:
+            return SignResult(
+                False, person_id,
+                error="登录不完整: 需要二维码验证", step="initiate",
+            )
 
         t0 = time.time()
         try:
@@ -1612,6 +1619,8 @@ class PH3Client:
         import json as _json
         if not self.logged_in:
             return False, "未登录", []
+        if self.qr_pending:
+            return False, "登录不完整: 需要二维码验证", []
         if not person_ids:
             return False, "person_ids 为空", []
 
@@ -1672,8 +1681,17 @@ class PH3Client:
                 "B0105_11": "0",
                 "B0105_12": "0",
                 "B0105_01": "2",
+                # contact_phone (YSLXDH) 服务端非空校验; 调用方未提供时
+                # 历史上一直退回到 "13800000000" 占位符 — 这会污染真实数据,
+                # 此处保留兼容但发出告警, 让上层调用者尽快迁移到真实电话.
                 "B0105_02": contact_phone or "13800000000",
             })
+        if not contact_phone:
+            logger.warning(
+                "family_batch_initiate: contact_phone is empty, "
+                "falling back to placeholder '13800000000' — please "
+                "configure a real 服务电话 to avoid polluting production data."
+            )
 
         try:
             resp = self.session.post(
@@ -1713,7 +1731,28 @@ class PH3Client:
                     break
 
         elapsed = time.time() - t0
-        return True, "家庭批量发起成功 (%d 人, %.1fs)" % (len(rows), elapsed), created
+        # 之前: 即便 created 为空也返回 success=True. 修复: 必须真的创建出来才算成功.
+        n_created = len(created)
+        n_requested = len(person_ids)
+        if n_created == 0:
+            return (
+                False,
+                "服务器接受了请求 (opType=0) 但创建后查证未发现新合同号 (%d 人, %.1fs)"
+                % (n_requested, elapsed),
+                created,
+            )
+        if n_created < n_requested:
+            return (
+                False,  # 部分失败也按失败计, 让 UI 不再把它统计为成功签约.
+                "家庭批量部分失败: 仅 %d/%d 创建成功 (%.1fs)"
+                % (n_created, n_requested, elapsed),
+                created,
+            )
+        return (
+            True,
+            "家庭批量发起成功 (%d 人, %.1fs)" % (n_created, elapsed),
+            created,
+        )
 
     # ---- 确认签约 ----
 
@@ -1727,6 +1766,11 @@ class PH3Client:
         """
         if not self.logged_in:
             return SignResult(False, person_id, name, error="未登录", step="confirm")
+        if self.qr_pending:
+            return SignResult(
+                False, person_id, name,
+                error="登录不完整: 需要二维码验证", step="confirm",
+            )
 
         t0 = time.time()
         try:
@@ -1790,6 +1834,17 @@ class PH3Client:
 
     # ---- 删除签约 ----
 
+    @staticmethod
+    def _opType_zero(text: str) -> bool:
+        """严格解析 JSON 后判断 opType==0; 之前的 substring 匹配会被
+        HTML 错误页里碰巧出现的 '"opType":0' 误报为成功。"""
+        import json as _json
+        try:
+            obj = _json.loads((text or "").strip())
+        except Exception:
+            return False
+        return obj.get("opType") == 0
+
     def delete_signing(self, contract_code: str) -> bool:
         """删除一条签约记录（ACTION=3），适用于status=5/6。"""
         try:
@@ -1802,7 +1857,7 @@ class PH3Client:
                 },
                 timeout=self._timeout,
             )
-            return '"opType":0' in resp.text or '"opType": 0' in resp.text
+            return self._opType_zero(resp.text)
         except Exception:
             return False
 
@@ -1819,7 +1874,7 @@ class PH3Client:
                 headers=self._csrf_header(),
                 timeout=self._timeout,
             )
-            return '"opType":0' in resp.text or '"opType": 0' in resp.text
+            return self._opType_zero(resp.text)
         except Exception:
             return False
 
@@ -1832,6 +1887,8 @@ class PH3Client:
         """
         if not self.logged_in:
             return False, {}, "未登录"
+        if self.qr_pending:
+            return False, {}, "登录不完整: 需要二维码验证"
 
         try:
             ts = str(int(time.time() * 1000))
@@ -1924,15 +1981,17 @@ class PH3Client:
             text = resp.text.strip()
             try:
                 obj = _json.loads(text)
-                if obj.get("opType") == 0:
-                    return True, "修改成功"
-                return False, obj.get("msg", "修改失败: opType=%s" % obj.get("opType"))
             except Exception:
-                if "成功" in text or text == "0":
-                    return True, "修改成功"
+                # 之前: "成功" 子串或 text=="0" 都视为成功 — 容易把 HTML 错误页
+                # 误判. 现在: 仅在严格 JSON 且 opType==0 时算成功.
                 if len(text) < 200:
-                    return False, "修改失败: %s" % text
-                return False, "修改失败(未知响应)"
+                    return False, "修改失败 (非JSON响应): %s" % text
+                return False, "修改失败 (未知响应)"
+            if obj.get("opType") == 0:
+                return True, "修改成功"
+            return False, obj.get(
+                "msg", "修改失败: opType=%s" % obj.get("opType"),
+            )
 
         except Exception as e:
             return False, "修改异常: %s" % str(e)
@@ -2012,15 +2071,10 @@ class PH3Client:
 
         if contract_status == "5" and contract_code:
             r = self.confirm_signing(person_id, contract_code, name)
-            if r.success:
-                r.elapsed = time.time() - t0
-                return r
-            return SignResult(
-                True, person_id, name,
-                contract_code=contract_code,
-                step="initiate",
-                elapsed=time.time() - t0,
-            )
+            r.elapsed = time.time() - t0
+            # 之前: confirm 失败时仍返回 success=True / step="initiate".
+            # 修复: 失败原样返回 (success=False, step="confirm"), 让 UI 看到真实错误.
+            return r
 
         r1 = self.initiate_signing(
             person_id,
@@ -2040,21 +2094,17 @@ class PH3Client:
         pname = r1.name or name
 
         if not cc:
+            # initiate 自称成功却没拿到 contract_code 视为不可继续 — 之前
+            # 返回 success=True 会让 UI 把它计入成功, 这是误报.
             return SignResult(
-                True, person_id, pname,
+                False, person_id, pname,
+                error="发起返回成功但缺失合同号 (contract_code)",
                 step="initiate", elapsed=time.time() - t0,
             )
 
         time.sleep(delay)
 
         r2 = self.confirm_signing(person_id, cc, pname)
-        if r2.success:
-            r2.elapsed = time.time() - t0
-            return r2
-
-        return SignResult(
-            True, person_id, pname,
-            contract_code=cc,
-            step="initiate",
-            elapsed=time.time() - t0,
-        )
+        r2.elapsed = time.time() - t0
+        # confirm 失败 -> success=False (之前会被错误地标 success=True / step="initiate")
+        return r2

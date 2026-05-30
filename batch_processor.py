@@ -22,7 +22,7 @@ import threading
 import logging
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 from pathlib import Path
@@ -415,155 +415,168 @@ class BatchProcessor:
 class SuccessLogger:
     """成功日志记录器，与原始 client.exe 相同的日志格式"""
     
-    def __init__(self, 
+    def __init__(self,
                  log_dir: str = "logs",
-                 success_log_dir: str = "logs/成功"):
+                 success_log_dir: str = "logs/成功",
+                 failure_log_dir: Optional[str] = None):
         """
-        初始化成功日志记录器
+        初始化成功 / 失败日志记录器
         
         Args:
-            log_dir: 日志目录
+            log_dir: 日志根目录
             success_log_dir: 成功日志目录
+            failure_log_dir: 失败日志目录, 默认 logs/失败
         """
         self.log_dir = Path(log_dir)
         self.success_log_dir = Path(success_log_dir)
+        if failure_log_dir is None:
+            failure_log_dir = str(self.log_dir / "失败")
+        self.failure_log_dir = Path(failure_log_dir)
         
-        # 创建目录
         self.success_log_dir.mkdir(parents=True, exist_ok=True)
+        self.failure_log_dir.mkdir(parents=True, exist_ok=True)
         
-        # 线程锁
         self.log_lock = threading.Lock()
         
         logger.info(f"成功日志记录器初始化完成: {self.success_log_dir}")
+        logger.info(f"失败日志记录器初始化完成: {self.failure_log_dir}")
+
+    @staticmethod
+    def _safe_account(account: Any) -> str:
+        """归一化账号 → 文件名安全字符串. 拒绝 dict/list/None 之类的脏输入。"""
+        if account is None:
+            return "unknown"
+        if not isinstance(account, str):
+            account = str(account)
+        # 去掉文件名危险字符 (Windows + macOS 共同集合)
+        bad = '<>:"/\\|?*\n\r\t'
+        return "".join("_" if c in bad else c for c in account).strip() or "unknown"
+
+    def _append_to_xlsx(self, log_file: Path, row: Dict[str, Any]) -> None:
+        """线程安全地把一行追加进 .xlsx (read-modify-write 在锁内)."""
+        with self.log_lock:
+            if log_file.exists():
+                try:
+                    existing_df = pd.read_excel(log_file)
+                    existing_data = existing_df.to_dict("records")
+                except Exception as e:
+                    logger.warning(f"读取现有日志文件失败, 将重建: {e}")
+                    existing_data = []
+            else:
+                existing_data = []
+            existing_data.append(row)
+            df = pd.DataFrame(existing_data)
+            df.to_excel(log_file, index=False)
     
-    def log_success(self, 
+    def log_success(self,
                     account: str,
                     result_data: Dict[str, Any],
                     additional_info: Optional[Dict[str, Any]] = None) -> str:
-        """
-        记录成功日志
-        
-        Args:
-            account: 账号名称
-            result_data: 结果数据
-            additional_info: 附加信息
-            
-        Returns:
-            str: 日志文件路径
-        """
+        """记录成功日志, 路径: logs/成功/YYYYMMDD/<account>.xlsx"""
         try:
-            # 获取当前日期
-            today = date.today()
-            date_str = today.strftime("%Y%m%d")
-            
-            # 创建日期目录
+            account = self._safe_account(account)
+            date_str = date.today().strftime("%Y%m%d")
             date_dir = self.success_log_dir / date_str
             date_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 日志文件名
             log_file = date_dir / f"{account}.xlsx"
-            
-            # 准备日志数据
-            log_data = {
-                'account': account,
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'success_time': time.time(),
-                **result_data
+
+            row = {
+                "account": account,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "success_time": time.time(),
+                **(result_data or {}),
             }
-            
-            # 添加附加信息
             if additional_info:
-                log_data.update(additional_info)
-            
-            # 使用线程锁确保线程安全
-            with self.log_lock:
-                # 检查文件是否存在
-                if log_file.exists():
-                    # 读取现有数据
-                    try:
-                        existing_df = pd.read_excel(log_file)
-                        existing_data = existing_df.to_dict('records')
-                    except Exception as e:
-                        logger.warning(f"读取现有日志文件失败: {e}")
-                        existing_data = []
-                else:
-                    existing_data = []
-                
-                # 添加新数据
-                existing_data.append(log_data)
-                
-                # 转换为DataFrame
-                df = pd.DataFrame(existing_data)
-                
-                # 保存到Excel
-                df.to_excel(log_file, index=False)
-                
-                logger.info(f"成功日志记录完成: {log_file}")
-                
-                return str(log_file)
-                
+                row.update(additional_info)
+
+            self._append_to_xlsx(log_file, row)
+            logger.info(f"成功日志记录完成: {log_file}")
+            return str(log_file)
         except Exception as e:
             logger.error(f"记录成功日志失败: {e}")
             raise
-    
-    def get_success_logs(self, 
-                        account: Optional[str] = None,
-                        date_str: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        获取成功日志
-        
-        Args:
-            account: 账号名称，如果为None则获取所有账号
-            date_str: 日期字符串 (格式: YYYYMMDD)，如果为None则获取所有日期
-            
-        Returns:
-            List[Dict[str, Any]]: 日志数据列表
+
+    def log_failure(self,
+                    account: str,
+                    result_data: Dict[str, Any],
+                    error: str = "",
+                    additional_info: Optional[Dict[str, Any]] = None) -> str:
+        """记录失败日志, 路径: logs/失败/YYYYMMDD/<account>.xlsx.
+
+        与 log_success 互为镜像; 让 "全面" 报告真正既覆盖成功也覆盖失败.
         """
         try:
-            logs = []
-            
-            # 确定要搜索的目录
+            account = self._safe_account(account)
+            date_str = date.today().strftime("%Y%m%d")
+            date_dir = self.failure_log_dir / date_str
+            date_dir.mkdir(parents=True, exist_ok=True)
+            log_file = date_dir / f"{account}.xlsx"
+
+            row = {
+                "account": account,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "fail_time": time.time(),
+                "error": error or "",
+                **(result_data or {}),
+            }
+            if additional_info:
+                row.update(additional_info)
+
+            self._append_to_xlsx(log_file, row)
+            logger.info(f"失败日志记录完成: {log_file}")
+            return str(log_file)
+        except Exception as e:
+            logger.error(f"记录失败日志失败: {e}")
+            raise
+
+    def get_failure_logs(self,
+                         account: Optional[str] = None,
+                         date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+        """读取失败日志 (与 get_success_logs 对称)。"""
+        return self._read_logs(self.failure_log_dir, account, date_str)
+    
+    def get_success_logs(self,
+                         account: Optional[str] = None,
+                         date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+        """读取成功日志."""
+        return self._read_logs(self.success_log_dir, account, date_str)
+
+    def _read_logs(self, root: Path,
+                   account: Optional[str],
+                   date_str: Optional[str]) -> List[Dict[str, Any]]:
+        try:
+            logs: List[Dict[str, Any]] = []
             if date_str:
-                search_dirs = [self.success_log_dir / date_str]
+                search_dirs = [root / date_str]
             else:
-                search_dirs = list(self.success_log_dir.iterdir())
-            
+                if not root.exists():
+                    return []
+                search_dirs = list(root.iterdir())
+
             for date_dir in search_dirs:
                 if not date_dir.is_dir():
                     continue
-                
-                # 确定要搜索的文件
                 if account:
-                    search_files = [date_dir / f"{account}.xlsx"]
+                    safe = self._safe_account(account)
+                    search_files = [date_dir / f"{safe}.xlsx"]
                 else:
                     search_files = date_dir.glob("*.xlsx")
-                
                 for log_file in search_files:
                     if not log_file.exists():
                         continue
-                    
                     try:
-                        # 读取Excel文件
                         df = pd.read_excel(log_file)
-                        
-                        # 转换为字典列表
-                        file_logs = df.to_dict('records')
-                        
-                        # 添加文件名信息
-                        for log in file_logs:
-                            log['log_file'] = str(log_file)
-                            log['date'] = date_dir.name
-                        
+                        file_logs = df.to_dict("records")
+                        for row in file_logs:
+                            row["log_file"] = str(log_file)
+                            row["date"] = date_dir.name
                         logs.extend(file_logs)
-                        
                     except Exception as e:
                         logger.warning(f"读取日志文件失败 {log_file}: {e}")
-            
-            logger.info(f"成功日志获取完成: {len(logs)} 条记录")
+            logger.info(f"日志获取完成 ({root.name}): {len(logs)} 条记录")
             return logs
-            
         except Exception as e:
-            logger.error(f"获取成功日志失败: {e}")
+            logger.error(f"获取日志失败: {e}")
             return []
     
     def clear_logs(self, 
