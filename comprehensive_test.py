@@ -35,7 +35,7 @@ def test_config_migration():
         old_config = {
             "url": "https://ggws.hnhfpc.gov.cn",
             "account": "test_user_old",
-            "org_code": "test_password_old",
+            "org_code": "431122012345678",
             "doctor": "测试医生_旧",
             "team": "测试团队_旧",
             "delay": "0.8",
@@ -67,7 +67,7 @@ def test_config_migration():
         # 检查字段映射
         test_cases = [
             ("account -> username", "test_user_old", config.get('username')),
-            ("org_code -> password", "test_password_old", config.get('password')),
+            ("org_code -> org_code", "431122012345678", config.get('org_code')),
             ("doctor -> doctor_name", "测试医生_旧", config.get('doctor_name')),
             ("team -> doctor_team", "测试团队_旧", config.get('doctor_team')),
             ("url -> ggws_base_url", "https://ggws.hnhfpc.gov.cn", config.get('ggws_base_url')),
@@ -571,7 +571,7 @@ def test_excel_logging():
     return all_passed
 
 def test_application_integration():
-    """测试应用程序集成"""
+    """测试应用程序集成 (使用临时目录，避免覆盖真实配置)"""
     print("\n" + "="*80)
     print("测试 5: 应用程序集成测试")
     print("="*80)
@@ -590,142 +590,132 @@ def test_application_integration():
         
         print(f"  ✓ 所有关键模块导入成功")
         
-        # 测试配置函数
-        print(f"\n测试配置函数:")
-        
-        # 创建临时配置
-        test_config = {
-            "username": "test_integration",
-            "password": "test_password_integration",
-            "doctor_name": "集成测试医生",
-            "doctor_team": "集成测试团队",
-            "contract_date": "2026-06-01",
-            "contract_years": "2",
-            "del_doctor": True,
-            "del_resident": True,
-            "del_valid": False,
-            "license_account": "license_test",
-            "license_password": "license_password_test"
-        }
-        
-        # 测试保存配置
-        try:
-            save_config(test_config)
-            print(f"  ✓ 配置保存函数正常")
-        except Exception as e:
-            print(f"  ✗ 配置保存函数异常: {e}")
-            all_passed = False
-        
-        # 测试加载配置
-        try:
-            loaded_config = load_config()
-            if loaded_config:
-                print(f"  ✓ 配置加载函数正常")
-                
-                # 验证关键字段
-                if loaded_config.get('username') == test_config['username']:
-                    print(f"  ✓ 配置数据正确")
-                else:
-                    print(f"  ✗ 配置数据不正确")
-                    all_passed = False
-            else:
-                print(f"  ✗ 配置加载返回空")
-                all_passed = False
-        except Exception as e:
-            print(f"  ✗ 配置加载函数异常: {e}")
-            all_passed = False
-        
-        print(f"\n测试组件初始化:")
-        
-        # 测试ConfigManager初始化
-        try:
-            config_manager = ConfigManager()
-            print(f"  ✓ ConfigManager初始化成功")
-        except Exception as e:
-            print(f"  ✗ ConfigManager初始化失败: {e}")
-            all_passed = False
-        
-        # 测试LicenseClient初始化
-        try:
-            license_config = LicenseConfig(
-                account="test_integration_account",
-                password="test_integration_password"
-            )
-            license_client = LicenseClient(license_config)
-            print(f"  ✓ LicenseClient初始化成功")
-        except Exception as e:
-            print(f"  ✗ LicenseClient初始化失败: {e}")
-            all_passed = False
-        
-        # 测试BatchProcessor初始化
-        try:
-            batch_processor = BatchProcessor(max_workers=1, batch_size=1)
-            print(f"  ✓ BatchProcessor初始化成功")
-        except Exception as e:
-            print(f"  ✗ BatchProcessor初始化失败: {e}")
-            all_passed = False
-        
-        # 测试SuccessLogger初始化
-        try:
-            success_logger = SuccessLogger()
-            print(f"  ✓ SuccessLogger初始化成功")
-        except Exception as e:
-            print(f"  ✗ SuccessLogger初始化失败: {e}")
-            all_passed = False
-        
-        print(f"\n测试组件交互:")
-        
-        # 测试配置管理器与许可证客户端的交互
-        try:
-            # 创建配置
+        with tempfile.TemporaryDirectory() as integration_tmp:
+            integration_tmp = Path(integration_tmp)
+
+            print(f"\n测试配置函数 (临时目录: {integration_tmp}):")
+
             test_config = {
-                "license_account": "interaction_test",
-                "license_password": "interaction_password"
+                "username": "test_integration",
+                "password": "test_password_integration",
+                "doctor_name": "集成测试医生",
+                "doctor_team": "集成测试团队",
+                "contract_date": "2026-06-01",
+                "contract_years": "2",
+                "del_doctor": True,
+                "del_resident": True,
+                "del_valid": False,
+                "license_account": "license_test",
+                "license_password": "license_password_test"
             }
-            
-            # 保存配置
-            config_manager = ConfigManager()
-            config_manager.save(test_config, validate=False)
-            
-            # 加载配置并创建许可证客户端
-            loaded_config = config_manager.load()
-            license_config = LicenseConfig(
-                account=loaded_config.get('license_account', ''),
-                password=loaded_config.get('license_password', '')
-            )
-            license_client = LicenseClient(license_config)
-            
-            print(f"  ✓ 配置管理器与许可证客户端交互成功")
-            
-        except Exception as e:
-            print(f"  ✗ 配置管理器与许可证客户端交互失败: {e}")
-            all_passed = False
-        
-        # 测试批量处理器与成功日志记录器的交互
-        try:
-            # 创建批量处理器
-            processor = BatchProcessor(max_workers=1, batch_size=1)
-            
-            # 添加任务
-            task_data = {"test": "integration"}
-            task_id = processor.add_task(task_data)
-            
-            # 模拟处理函数
-            def mock_process(data):
-                return {"success": True, "result": "processed"}
-            
-            # 处理任务
-            results = processor.process_tasks(mock_process)
-            
-            if results and results[0].success:
-                print(f"  ✓ 批量处理器与任务处理交互成功")
-            else:
-                print(f"  ✗ 批量处理器与任务处理交互失败")
+
+            try:
+                isolated_mgr = ConfigManager(config_dir=integration_tmp)
+                isolated_mgr.save(test_config)
+                print(f"  ✓ 配置保存函数正常")
+            except Exception as e:
+                print(f"  ✗ 配置保存函数异常: {e}")
                 all_passed = False
-                
-        except Exception as e:
-            print(f"  ✗ 批量处理器与任务处理交互失败: {e}")
-            all_passed = False
+
+            try:
+                loaded_config = isolated_mgr.load()
+                if loaded_config:
+                    print(f"  ✓ 配置加载函数正常")
+                    if loaded_config.get('username') == test_config['username']:
+                        print(f"  ✓ 配置数据正确")
+                    else:
+                        print(f"  ✗ 配置数据不正确")
+                        all_passed = False
+                else:
+                    print(f"  ✗ 配置加载返回空")
+                    all_passed = False
+            except Exception as e:
+                print(f"  ✗ 配置加载函数异常: {e}")
+                all_passed = False
+
+            print(f"\n测试组件初始化:")
+
+            try:
+                config_manager = ConfigManager(config_dir=integration_tmp)
+                print(f"  ✓ ConfigManager初始化成功")
+            except Exception as e:
+                print(f"  ✗ ConfigManager初始化失败: {e}")
+                all_passed = False
+
+            try:
+                license_config = LicenseConfig(
+                    account="test_integration_account",
+                    password="test_integration_password"
+                )
+                license_client = LicenseClient(license_config)
+                print(f"  ✓ LicenseClient初始化成功")
+            except Exception as e:
+                print(f"  ✗ LicenseClient初始化失败: {e}")
+                all_passed = False
+
+            try:
+                batch_processor = BatchProcessor(
+                    max_workers=1, batch_size=1,
+                    log_dir=str(integration_tmp / "logs"),
+                    success_log_dir=str(integration_tmp / "logs" / "成功"),
+                )
+                print(f"  ✓ BatchProcessor初始化成功")
+            except Exception as e:
+                print(f"  ✗ BatchProcessor初始化失败: {e}")
+                all_passed = False
+
+            try:
+                success_logger = SuccessLogger(
+                    log_dir=str(integration_tmp / "logs"),
+                    success_log_dir=str(integration_tmp / "logs" / "成功"),
+                )
+                print(f"  ✓ SuccessLogger初始化成功")
+            except Exception as e:
+                print(f"  ✗ SuccessLogger初始化失败: {e}")
+                all_passed = False
+
+            print(f"\n测试组件交互:")
+
+            try:
+                test_config2 = {
+                    "username": "interaction_test",
+                    "license_account": "interaction_test",
+                    "license_password": "interaction_password"
+                }
+                isolated_mgr.save(test_config2, validate=False)
+                loaded_config = isolated_mgr.load()
+                license_config = LicenseConfig(
+                    account=loaded_config.get('license_account', ''),
+                    password=loaded_config.get('license_password', '')
+                )
+                license_client = LicenseClient(license_config)
+                print(f"  ✓ 配置管理器与许可证客户端交互成功")
+            except Exception as e:
+                print(f"  ✗ 配置管理器与许可证客户端交互失败: {e}")
+                all_passed = False
+        
+            try:
+                processor = BatchProcessor(
+                    max_workers=1, batch_size=1,
+                    log_dir=str(integration_tmp / "logs"),
+                    success_log_dir=str(integration_tmp / "logs" / "成功"),
+                )
+                processor.add_task({"test": "integration"})
+
+                def mock_process(data):
+                    return {"success": True, "result": "processed"}
+
+                results = processor.process_tasks(mock_process)
+
+                if results and results[0].success:
+                    print(f"  ✓ 批量处理器与任务处理交互成功")
+                else:
+                    print(f"  ✗ 批量处理器与任务处理交互失败")
+                    all_passed = False
+
+            except Exception as e:
+                print(f"  ✗ 批量处理器与任务处理交互失败: {e}")
+                all_passed = False
         
     except ImportError as e:
         print(f"  ✗ 模块导入失败: {e}")

@@ -7,9 +7,53 @@ build/
 dist/
 *.egg-info/
 gulfsign_config.json
+gulfsign_config.json.bak*
+gulfsign_config.json.backup_*
 .env
+*.env
+!.dbg/.gitkeep
 .DS_Store
 certs/
 traffic_log.txt
 captured_openids.txt
 scripts/ph3_probe_history.jsonl
+
+# Local virtual environments
+.venv/
+.venv-tk/
+venv/
+
+# Local debug / one-shot session artifacts (not part of release)
+debug_*.py
+fix_*.py
+find_*.py
+verify_*.py
+analyze_*.py
+debug_server.py
+test_actual_*.py
+test_fixed_*.py
+test_login_*.py
+test_org_*.py
+test_query_*.py
+test_real_*.py
+test_web_*.py
+test_current_*.py
+test_diagnosis_*.py
+simple_*.py
+
+# Debug logs / evidence dumps
+debug-*.md
+debug_evidence_*.json
+debug_login_logs.json
+qr_verification_*_20*.json
+test_results_*.json
+login_url_test_results*.txt
+correct_login_url_findings.txt
+html_analysis_results.json
+*_page_20*.html
+
+# Chinese-named debug reports from one-shot sessions
+网页登录URL修复报告.md
+网页登录使用指南.txt
+二维码验证问题解决方案指南.txt
+修复报告_*.json

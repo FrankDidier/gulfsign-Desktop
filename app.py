@@ -2411,6 +2411,16 @@ class GulfSignApp(tk.Tk):
             self.var_batch_size.set(str(c["batch_size"]))
 
     def _save_current_config(self):
+        """Persist the current GUI state to disk.
+
+        Reading Tk variables (`StringVar.get()`) from a non-main thread is a
+        Tcl threading violation. If a worker accidentally calls us, hop back
+        to the main thread using ``after(0, ...)`` to do the actual read+save.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            self.after(0, self._save_current_config)
+            return
+
         config_data = {
             # 使用新格式字段名
             "username": self.var_account.get(),
@@ -3702,9 +3712,17 @@ class GulfSignApp(tk.Tk):
         self.enhanced_status_var.set("正在诊断连接状态...")
         self.enhanced_diagnose_btn.configure(state=tk.DISABLED)
         
+        # Capture Tk variables on main thread to avoid Tcl threading violations
+        snapshot = {
+            "base_url": self.enhanced_url_var.get(),
+            "account": self.enhanced_account_var.get(),
+        }
+
         def worker():
-            diagnostics = self._perform_login_diagnosis()
-            self.after(0, lambda: self._display_login_diagnostics(diagnostics))
+            diagnostics = self._perform_login_diagnosis(snapshot)
+            self._safe_after(
+                lambda: self._display_login_diagnostics(diagnostics)
+            )
         
         threading.Thread(target=worker, daemon=True).start()
     
@@ -3718,11 +3736,28 @@ class GulfSignApp(tk.Tk):
         self.enhanced_diagnose_btn.configure(state=tk.DISABLED)
         self.enhanced_detailed_diagnose_btn.configure(state=tk.DISABLED)
         
+        # Capture Tk variables on main thread to avoid Tcl threading violations
+        snapshot = {
+            "base_url": self.enhanced_url_var.get(),
+            "account": self.enhanced_account_var.get(),
+        }
+
         def worker():
-            diagnostics = self._perform_detailed_diagnosis()
-            self.after(0, lambda: self._display_detailed_diagnostics(diagnostics))
+            diagnostics = self._perform_detailed_diagnosis(snapshot)
+            self._safe_after(
+                lambda: self._display_detailed_diagnostics(diagnostics)
+            )
         
         threading.Thread(target=worker, daemon=True).start()
+
+    def _safe_after(self, callback):
+        """Schedule a callback on the Tk thread, but tolerate a destroyed
+        root window or a parent widget already torn down (this can happen
+        when a worker thread completes after the user closed the app)."""
+        try:
+            self.after(0, callback)
+        except (tk.TclError, RuntimeError):
+            pass
     
     def _check_login_status(self) -> Tuple[bool, str, str]:
         """统一检查登录状态
@@ -3759,8 +3794,11 @@ class GulfSignApp(tk.Tk):
         # 默认情况
         return False, "未登录或会话已过期", "请使用API登录或网页登录"
     
-    def _perform_login_diagnosis(self) -> List[Tuple[str, bool, str]]:
-        """执行诊断"""
+    def _perform_login_diagnosis(
+        self, snapshot: Optional[Dict[str, str]] = None,
+    ) -> List[Tuple[str, bool, str]]:
+        """执行诊断 (snapshot 为主线程预先采集的 Tk 变量值，避免线程冲突)"""
+        snapshot = snapshot or {}
         diagnostics = []
         
         # 1. 测试网络连接
@@ -3771,7 +3809,7 @@ class GulfSignApp(tk.Tk):
             diagnostics.append(("网络连接", False, f"网络连接失败: {str(e)}"))
         
         # 2. 测试公卫3.0系统 - 使用多种SSL/TLS配置和SSO重定向处理
-        base_url = self.enhanced_url_var.get()
+        base_url = snapshot.get("base_url", "") or self._cfg.get("ggws_base_url", "")
         if not base_url:
             diagnostics.append(("公卫3.0系统", False, "系统地址为空"))
             diagnostics.append(("配置完整性", False, "缺失: 3.0系统地址"))
@@ -3961,8 +3999,11 @@ class GulfSignApp(tk.Tk):
             self.enhanced_connection_status_var.set("连接异常")
             self.enhanced_connection_status_label.configure(foreground="red")
     
-    def _perform_detailed_diagnosis(self) -> List[Tuple[str, bool, str, str]]:
-        """执行详细诊断"""
+    def _perform_detailed_diagnosis(
+        self, snapshot: Optional[Dict[str, str]] = None,
+    ) -> List[Tuple[str, bool, str, str]]:
+        """执行详细诊断 (snapshot 为主线程预先采集的 Tk 变量值，避免线程冲突)"""
+        snapshot = snapshot or {}
         diagnostics = []
         
         # 1. 测试网络连接
@@ -3986,7 +4027,7 @@ class GulfSignApp(tk.Tk):
             diagnostics.append(("DNS解析", False, f"解析失败", str(e)))
         
         # 3. 测试公卫3.0系统连接
-        base_url = self.enhanced_url_var.get()
+        base_url = snapshot.get("base_url", "") or self._cfg.get("ggws_base_url", "")
         if not base_url:
             diagnostics.append(("系统连接", False, "系统地址为空", ""))
         else:
@@ -4201,7 +4242,7 @@ class GulfSignApp(tk.Tk):
             self.enhanced_diag_text.configure(state=tk.DISABLED)
     
     def _open_web_login(self):
-        """打开网页登录"""
+        """打开网页登录 (方式1)"""
         account = self.enhanced_api_account_var.get().strip()
         base_url = self.enhanced_url_var.get().strip()
         
@@ -4211,38 +4252,48 @@ class GulfSignApp(tk.Tk):
         
         self.enhanced_status_var.set("正在打开浏览器...")
         self.enhanced_web_login_btn.configure(state=tk.DISABLED)
-        
+
+        # Pre-bind PH3 client base_url on main thread so subsequent
+        # 同步配置 calls hit the right server.
+        try:
+            self.client.base_url = base_url.rstrip("/")
+        except Exception:
+            pass
+
         def worker():
             try:
                 # 构建登录URL - 使用FormMain.aspx触发SSO重定向
                 # 这是PH3Client使用的正确登录流程
                 login_url = f"{base_url.rstrip('/')}/FormMain.aspx"
-                
-                # 注意：FormMain.aspx不接受user参数
-                # 它会自动重定向到SSO认证页面
-                # 用户需要在浏览器中手动输入账号密码
-                
-                # 打开浏览器
                 webbrowser.open(login_url)
-                
                 success = True
-                message = f"已打开浏览器: {login_url}\n请在浏览器中完成SSO登录"
-                
-                # 保存配置（即使没有密码，也保存账号和系统地址）
-                if account or base_url:
-                    self.var_account.set(account)
-                    self.var_url.set(base_url)
-                    self._cfg["username"] = account
-                    self._cfg["ggws_base_url"] = base_url
-                    self._save_current_config()
-                
+                message = (f"已打开浏览器: {login_url}\n"
+                           "请在浏览器中完成SSO登录")
             except Exception as e:
                 success = False
                 message = f"打开浏览器失败: {str(e)}"
             
-            self.after(0, lambda: self._web_login_result(success, message))
-        
+            # All Tk-variable writes + config save happen on the main thread.
+            self._safe_after(lambda: self._web_login_apply_and_finish(
+                success, message, account, base_url
+            ))
+
         threading.Thread(target=worker, daemon=True).start()
+
+    def _web_login_apply_and_finish(self, success: bool, message: str,
+                                    account: str, base_url: str):
+        """Main-thread continuation for `_open_web_login`."""
+        if success and (account or base_url):
+            try:
+                self.var_account.set(account)
+                self.var_url.set(base_url)
+                self._cfg["username"] = account
+                self._cfg["ggws_base_url"] = base_url
+                self._save_current_config()
+            except Exception as e:
+                # Don't crash the UI if config save fails for some reason.
+                print(f"[web-login] config save warning: {e}")
+        self._web_login_result(success, message)
     def _web_login_result(self, success: bool, message: str):
         """网页登录结果"""
         self.enhanced_web_login_btn.configure(state=tk.NORMAL)
@@ -4270,58 +4321,57 @@ class GulfSignApp(tk.Tk):
             messagebox.showerror("错误", message)
     
     def _sync_login_configuration(self):
-        """同步配置 - 实际从PH3Client会话中提取机构信息"""
+        """同步配置 - 从PH3Client会话中提取机构信息"""
         self.enhanced_status_var.set("正在同步配置信息...")
         self.enhanced_sync_btn.configure(state=tk.DISABLED)
         
         def worker():
             try:
-                # 获取当前页面HTML
+                # 获取当前页面HTML (网络IO在 worker 线程)
                 current_page_html = self._get_current_page_html()
                 
                 if not current_page_html:
-                    self.after(0, lambda: self._sync_login_failed("无法获取当前页面，请确保已在浏览器中登录"))
+                    self._safe_after(lambda: self._sync_login_failed(
+                        "无法获取当前页面，请确保已在浏览器中登录"
+                    ))
                     return
                 
                 # 从HTML中提取机构信息
                 extracted = self._extract_org_info_from_html(current_page_html)
                 
-                # 如果机构代码为空，尝试其他方法
+                # 如果机构代码为空，回退到客户端已有的字段
                 if not extracted.get("org_code"):
-                    # 尝试从客户端属性中获取
-                    if hasattr(self.client, 'org_code') and self.client.org_code:
+                    if getattr(self.client, "org_code", ""):
                         extracted["org_code"] = self.client.org_code
-                    
-                    if hasattr(self.client, 'org_name') and self.client.org_name:
+                    if getattr(self.client, "org_name", ""):
                         extracted["org_name"] = self.client.org_name
-                    
-                    if hasattr(self.client, 'doctor_name') and self.client.doctor_name:
+                    if getattr(self.client, "doctor_name", ""):
                         extracted["doctor_name"] = self.client.doctor_name
-                    
-                    if hasattr(self.client, 'team_name') and self.client.team_name:
+                    if getattr(self.client, "team_name", ""):
                         extracted["team_name"] = self.client.team_name
                 
-                # 添加同步时间戳
                 extracted["synced_at"] = datetime.now().isoformat()
                 extracted["extraction_method"] = "actual_session"
                 
-                # 更新配置
-                self._cfg.update(extracted)
-                
-                # 更新UI显示
-                self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
-                
-                # 保存配置
-                self._save_current_config()
-                
-                self.after(0, lambda: self._sync_login_complete(extracted))
+                # All UI writes + config save run on main thread
+                self._safe_after(lambda: self._sync_apply_and_complete(extracted))
                 
             except Exception as e:
                 error_msg = f"同步配置失败: {str(e)}"
                 print(f"❌ {error_msg}")
-                self.after(0, lambda: self._sync_login_failed(error_msg))
+                self._safe_after(lambda: self._sync_login_failed(error_msg))
         
         threading.Thread(target=worker, daemon=True).start()
+
+    def _sync_apply_and_complete(self, extracted: Dict[str, Any]):
+        """Main-thread continuation for `_sync_login_configuration`."""
+        try:
+            self._cfg.update(extracted)
+            self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
+            self._save_current_config()
+        except Exception as e:
+            print(f"[sync] apply warning: {e}")
+        self._sync_login_complete(extracted)
     
     def _get_current_page_html(self) -> str:
         """获取当前页面HTML"""
@@ -4449,7 +4499,7 @@ class GulfSignApp(tk.Tk):
         self._run_login_diagnosis()
     
     def _perform_api_login(self):
-        """执行API登录"""
+        """执行API登录 (方式2)"""
         account = self.enhanced_api_account_var.get().strip()
         password = self.enhanced_api_password_var.get().strip()
         base_url = self.enhanced_url_var.get().strip()
@@ -4463,29 +4513,36 @@ class GulfSignApp(tk.Tk):
         
         def worker():
             try:
-                # 调用现有的登录方法
-                success, message = self.client.login(base_url, account, password)
-                
-                if success:
-                    # 更新主UI变量
-                    self.var_account.set(account)
-                    self.var_password.set(password)
-                    self.var_url.set(base_url)
-                    
-                    # 更新配置
-                    self._cfg["username"] = account
-                    self._cfg["password"] = password
-                    self._cfg["ggws_base_url"] = base_url
-                    
-                    # 保存配置
-                    self._save_current_config()
-                
-                self.after(0, lambda: self._api_login_result(success, message))
-                
+                # 调用现有的登录方法 (网络IO在 worker 线程)
+                success, message = self.client.login(
+                    base_url, account, password
+                )
             except Exception as e:
-                self.after(0, lambda: self._api_login_result(False, f"登录异常: {str(e)}"))
+                success, message = False, f"登录异常: {str(e)}"
+            
+            # All Tk-variable writes + config save happen on the main thread.
+            self._safe_after(lambda: self._api_login_apply_and_finish(
+                success, message, account, password, base_url
+            ))
         
         threading.Thread(target=worker, daemon=True).start()
+
+    def _api_login_apply_and_finish(self, success: bool, message: str,
+                                    account: str, password: str,
+                                    base_url: str):
+        """Main-thread continuation for `_perform_api_login`."""
+        if success:
+            try:
+                self.var_account.set(account)
+                self.var_password.set(password)
+                self.var_url.set(base_url)
+                self._cfg["username"] = account
+                self._cfg["password"] = password
+                self._cfg["ggws_base_url"] = base_url
+                self._save_current_config()
+            except Exception as e:
+                print(f"[api-login] config save warning: {e}")
+        self._api_login_result(success, message)
     
     def _api_login_result(self, success: bool, message: str):
         """API登录结果"""

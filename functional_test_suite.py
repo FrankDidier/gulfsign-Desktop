@@ -105,11 +105,11 @@ class FunctionalTestSuite:
             return self._record_test_result(test_name, False, f"模块导入测试异常: {e}")
     
     def test_config_manager(self):
-        """测试配置管理器"""
+        """测试配置管理器 (使用临时目录避免污染真实配置)"""
         test_name = "配置管理器测试"
         try:
-            # 创建配置管理器
-            config_manager = ConfigManager()
+            # 配置管理器初始化到临时目录
+            config_manager = ConfigManager(config_dir=self.temp_dir)
             
             # 测试默认配置
             default_config = config_manager._get_default_config()
@@ -357,18 +357,21 @@ class FunctionalTestSuite:
             return self._record_test_result(test_name, False, f"全面报告功能测试失败: {e}")
     
     def test_overall_workflow(self):
-        """测试整体工作流程"""
+        """测试整体工作流程 (使用临时目录避免污染真实配置)"""
         test_name = "整体工作流程测试"
         try:
             # 模拟完整的工作流程
             
             # 1. 初始化所有组件
-            config_manager = ConfigManager()
+            config_manager = ConfigManager(config_dir=self.temp_dir)
             ph3_client = PH3Client()
             hc_client = HealthCardClient()
             signing_engine = SigningEngine(hc_client, ph3_client)
             license_client = LicenseClient()
-            batch_processor = BatchProcessor()
+            batch_processor = BatchProcessor(
+                log_dir=os.path.join(self.temp_dir, "logs"),
+                success_log_dir=os.path.join(self.temp_dir, "logs", "成功"),
+            )
             
             # 2. 验证组件初始化成功
             assert config_manager is not None, "配置管理器初始化失败"
