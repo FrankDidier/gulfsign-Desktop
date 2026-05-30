@@ -317,8 +317,7 @@ class ProvinceLookupDialog(tk.Toplevel):
         self.btn_initiate.configure(state=state)
 
     def _on_search(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先在主界面登录 3.0 系统")
+        if not self.app._ensure_session_usable("查找"):
             return
         sfzh = self.var_sfzh.get().strip()
         xm = self.var_xm.get().strip()
@@ -1243,8 +1242,7 @@ class GulfSignApp(tk.Tk):
 
     def _on_hc_sync_from_ph3(self):
         """Sync signing config from the logged-in 3.0 system."""
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先在「3.0系统签约」页面登录")
+        if not self._ensure_session_usable("从3.0同步配置"):
             return
 
         self.btn_hc_sync_from_ph3.configure(state=tk.DISABLED)
@@ -2668,8 +2666,7 @@ class GulfSignApp(tk.Tk):
     def _on_family_batch_initiate(self):
         if self._signing:
             return
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_session_usable("家庭批量发起"):
             return
         if not self.patients:
             messagebox.showwarning("提示", "请先查询并选择居民")
@@ -3015,15 +3012,48 @@ class GulfSignApp(tk.Tk):
         return extra
 
     def _on_open_province_dialog(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录 3.0 系统")
+        if not self._ensure_session_usable("打开全省查找"):
             return
         dlg = ProvinceLookupDialog(self)
         dlg.grab_set()
 
+    def _ensure_session_usable(self, action: str = "操作") -> bool:
+        """Pre-flight check: session must be fully authenticated (not just
+        QR-pending). Pops a clear, actionable error and returns False
+        otherwise. ``action`` is woven into the message (e.g. "查询" / "签约").
+        """
+        if not getattr(self.client, "logged_in", False):
+            messagebox.showwarning("提示", f"请先登录公卫3.0系统再{action}")
+            return False
+        if getattr(self.client, "qr_pending", False):
+            messagebox.showwarning(
+                "需要二维码验证",
+                f"API 登录已下发 Token，但服务器仍在等待二维码扫描，"
+                f"无法{action}。\n\n"
+                "请按以下步骤操作：\n"
+                "  1. 点击 [跳转到3.0系统登录]，在浏览器中完成扫码\n"
+                "  2. 浏览器登录成功后回到本程序，点击 [同步配置]\n"
+                f"  3. 同步成功后再{action}",
+            )
+            return False
+        return True
+
+    def _ensure_can_query(self) -> bool:
+        """Pre-flight for 查询(首页) / 查询全部 — adds org_code check."""
+        if not self._ensure_session_usable("查询"):
+            return False
+        if not self.var_org.get().strip():
+            messagebox.showwarning(
+                "缺少机构代码",
+                "查询需要机构代码 (org_code)，但当前为空。\n\n"
+                "请先完成浏览器扫码登录后点 [同步配置] 自动获取，\n"
+                "或在 [机构代码] 字段中手动填入您所属医院的代码。",
+            )
+            return False
+        return True
+
     def _on_query(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_can_query():
             return
 
         self.btn_query.configure(state=tk.DISABLED)
@@ -3044,8 +3074,7 @@ class GulfSignApp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_query_all(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_can_query():
             return
 
         self.btn_query.configure(state=tk.DISABLED)
@@ -3174,8 +3203,7 @@ class GulfSignApp(tk.Tk):
         if self._signing:
             return
 
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_session_usable("批量签约"):
             return
 
         targets = [p for p in self.patients if p.person_id in self.selected_ids]
@@ -3762,36 +3790,65 @@ class GulfSignApp(tk.Tk):
     def _check_login_status(self) -> Tuple[bool, str, str]:
         """统一检查登录状态
         
-        返回: (是否已登录, 状态消息, 详细信息)
+        返回: (是否已登录(且可用), 状态消息, 详细信息)
+        
+        注意 "可用" 的语义: 仅当 PH3 会话完全通过 SSO + 二维码验证、
+        且已拿到机构代码时才返回 True。仅持有 Token 但卡在二维码 2FA 上
+        的会话在这里返回 False，避免误导用户去点 [查询]。
         """
-        # 方法1: 检查客户端logged_in属性
-        if hasattr(self.client, 'logged_in') and self.client.logged_in:
+        client = self.client
+        # QR-pending: token 已下发但服务器仍在等扫码，查询/签约都会失败。
+        if getattr(client, "qr_pending", False):
+            return (
+                False,
+                "登录不完整: 需要二维码验证",
+                "请使用 [跳转到3.0系统登录] 在浏览器扫码后回来点 [同步配置]",
+            )
+
+        # 完整登录 (logged_in 且 不是 qr_pending)
+        if getattr(client, "logged_in", False):
             user_info = self._cfg.get("username", "未知用户")
-            org_info = self._cfg.get("org_name", "")
+            org_info = self._cfg.get("org_name", "") or getattr(client, "org_name", "")
             if org_info:
                 user_info = f"{user_info} ({org_info})"
+            # 即使 logged_in，如果 org_code 还没拿到也算 "登录但未同步"
+            if not (self._cfg.get("org_code") or getattr(client, "org_code", "")):
+                return (
+                    True,
+                    f"已登录但缺少机构信息: {user_info}",
+                    "请点击 [同步配置] 获取机构代码",
+                )
             return True, f"已登录: {user_info}", "客户端状态有效"
-        
-        # 方法2: 检查是否有有效的会话和Token
-        if hasattr(self.client, 'session') and self.client.session:
-            # 检查会话中是否有必要的Cookie
-            cookies = self.client.session.cookies
-            if cookies:
-                # 检查是否有看起来像认证Cookie的项
-                auth_cookies = [name for name in cookies.keys() 
-                              if any(keyword in name.lower() for keyword in ['auth', 'token', 'session', 'login'])]
-                if auth_cookies:
-                    return True, "检测到认证Cookie", f"Cookie: {', '.join(auth_cookies[:2])}"
-        
-        # 方法3: 检查配置中是否有机构代码（表示曾经成功登录过）
+
+        # 仅检测到认证Cookie (例如手动浏览器登录后再打开App)
+        if hasattr(client, "session") and client.session and client.session.cookies:
+            auth_cookies = [
+                name for name in client.session.cookies.keys()
+                if any(k in name.lower()
+                       for k in ("auth", "token", "session", "login"))
+            ]
+            if auth_cookies:
+                return (
+                    False,
+                    "检测到认证Cookie但未确认登录",
+                    f"Cookie: {', '.join(auth_cookies[:2])}; 请点 [API直接登录] 或 [同步配置]",
+                )
+
+        # 配置中有机构代码: 上一次登录留下的, 但当前未连
         if self._cfg.get("org_code"):
-            return True, "配置中有机构代码", "可能已登录过或配置已保存"
-        
-        # 方法4: 检查增强登录变量中是否有账号和系统地址
-        if self.enhanced_account_var.get() and self.enhanced_url_var.get():
+            return (
+                False,
+                "未登录 (上次配置中保留有机构代码)",
+                "请点 [API直接登录] 或 [跳转到3.0系统登录]",
+            )
+
+        # 有账号但未点过登录按钮
+        if (hasattr(self, "enhanced_account_var") and
+                self.enhanced_account_var.get() and
+                hasattr(self, "enhanced_url_var") and
+                self.enhanced_url_var.get()):
             return False, "有账号信息但未执行登录", "请点击API登录或网页登录按钮"
         
-        # 默认情况
         return False, "未登录或会话已过期", "请使用API登录或网页登录"
     
     def _perform_login_diagnosis(
@@ -4548,18 +4605,31 @@ class GulfSignApp(tk.Tk):
         """API登录结果"""
         self.enhanced_api_login_btn.configure(state=tk.NORMAL)
         
-        if success:
-            self.enhanced_status_var.set("登录成功")
-            messagebox.showinfo("登录成功", message)
-            
-            # 启用同步按钮
-            self.enhanced_sync_btn.configure(state=tk.NORMAL)
-            
-            # 重新运行诊断
-            self._run_login_diagnosis()
-        else:
+        if not success:
             self.enhanced_status_var.set("登录失败")
             messagebox.showerror("登录失败", message)
+            return
+
+        # success=True 也可能只是 "Token已下发但二维码未扫描"
+        if getattr(self.client, "qr_pending", False):
+            self.enhanced_status_var.set("登录不完整: 需要二维码验证")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+            messagebox.showwarning(
+                "需要二维码验证",
+                f"{message}\n\n"
+                "服务器在 SSO 之外强制要求二维码扫码验证。\n\n"
+                "下一步：\n"
+                "  1. 点击 [跳转到3.0系统登录]，在浏览器中完成扫码\n"
+                "  2. 浏览器登录成功后回到本程序，点击 [同步配置]\n"
+                "  3. 同步成功后再使用 [查询(首页)] / [查询全部]"
+            )
+        else:
+            self.enhanced_status_var.set("登录成功")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+            messagebox.showinfo("登录成功", message)
+
+        # 不论是哪一种成功，都重新跑诊断
+        self._run_login_diagnosis()
 
 
 def main():

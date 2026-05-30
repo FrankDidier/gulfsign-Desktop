@@ -223,8 +223,19 @@ class PH3Client:
         self.org_name: str = ""
         self.doctor_name: str = ""
         self.team_name: str = ""
+        # `logged_in` is True both for fully-authorized sessions AND for
+        # sessions that have valid SSO tokens but are stuck behind the
+        # server-side QR-code 2FA gate (msg<=4). Use `qr_pending` to
+        # distinguish: a QR-pending session cannot run query/sign APIs.
         self.logged_in: bool = False
+        self.qr_pending: bool = False
         self._timeout: int = 60
+
+    @property
+    def fully_authenticated(self) -> bool:
+        """True only when login is complete AND QR/2FA was satisfied
+        AND we have an org_code (without which queries are pointless)."""
+        return bool(self.logged_in and not self.qr_pending and self.org_code)
 
     # ---- helpers ----
 
@@ -734,8 +745,12 @@ class PH3Client:
                 # 需要二维码验证
                 logger.info(f"需要二维码验证 (msg={msg_int})")
                 
-                # 设置登录状态为需要验证
+                # SSO 通过、Token 已下发，但服务器仍在等待二维码扫描；
+                # 此时账号在 PH3 接口看来是 "已登录但未完成 2FA"。
+                # `logged_in=True` 让浏览器跳转/Cookie 复用流程可以继续，
+                # `qr_pending=True` 让查询/签约/同步配置接口拒绝调用。
                 self.logged_in = True
+                self.qr_pending = True
                 self.doctor_name = "需要二维码验证"
                 
                 # 提供清晰的错误信息和解决方案
@@ -794,6 +809,7 @@ class PH3Client:
                     self._drill_org_tree(orgs)
 
             self.logged_in = True
+            self.qr_pending = False  # 完整登录: 不需要二维码
             info = self.doctor_name or account
             if self.org_name:
                 info += " (%s)" % self.org_name
