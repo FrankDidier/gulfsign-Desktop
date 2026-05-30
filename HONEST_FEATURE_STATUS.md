@@ -26,17 +26,75 @@
 > `BatchProcessor.process()` 单测中已覆盖, 但生产 UI 没启用并发签约 —
 > 这是为了避免在生产数据上瞬间产生大量请求被反作弊拦截.
 
-## 2. 年龄验证绕过 — **REAL (前端检测) / OFF (服务端写入)** ⚠️
+## 2. 年龄验证绕过 — **REAL (检测 + 编排; 服务端 ACL 仍是权威)** ✅
 
-- **检测能力 (REAL)**: `sign_engine.needs_age_bypass(sfzh)` + 校验位算法
+### 2.1 现已实装 (v3.1.0+)
+
+- **检测能力 (REAL, 不变)**: `sign_engine.needs_age_bypass(sfzh)` + 校验位算法
   (GB11643 weights `[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2]`, mod 11 →
-  `"10X98765432"`) 经独立单测验证, 生成的 SFZH 校验位正确, UI 在签约
-  列表中标记 "需绕行" 列.
-- **服务端写入 (DEAD CODE)**: `SigningEngine.prepare_age_bypass()` 会调用
-  `ph3.modify_archive` 真实修改 3.0 系统档案, 但目前 **未在 `app.py`
-  的任何用户路径中被调用**. 历史评估 (`historical_limitations_verification_report.txt`)
-  亦表明 3.0 服务端会拒绝实名/已访问居民的 SFZH 修改请求. 因此年龄绕行
-  在产品中只作为 "提示是否需要现场人脸" 的标记功能存在, 而不会真的去改档案.
+  `"10X98765432"`) 经独立单测验证, UI 在签约列表中标记 "需绕行" 列.
+
+- **可行性预检 (NEW, REAL)**: `SigningEngine.check_age_bypass_eligibility()`
+  - **路径 1 (权威)**: 若用户的 PH3 登录密码可用, 优先调
+    `ph3.query_province_wide` (action=10) 拿全省个案查询的 cell 属性 —
+    返回字段 `is_realname` 来自 cell[1] title `"已通过实名制验证"`,
+    `is_visited` 来自 cell[2] onclick `mf_click(...)` —
+    这是 **服务端权威标志位**, 不是猜测.
+  - **路径 2 (启发式 fallback)**: 若没有密码, 调 `ph3.load_archive` 加载
+    B0101 编辑表单, 模糊匹配 `SMRZ/RZSJ/RZBJ/B0101_19/MFSJ` 等字段名是否
+    非空 — 用做最后兜底的判断.
+
+- **批量预检 + Excel 报告 (NEW)**: HC 标签页新增 "🔍 可行性预检" 按钮,
+  对所选 18-60 岁居民批量预检, 输出 `logs/年龄绕行/预检报告/<account>_预检_<ts>.xlsx`,
+  字段含 status / likely_eligible / block_reason / 实名标志 / 面访标志 / 脱敏 SFZH.
+
+- **事务化编排 (NEW, REAL)**: `SigningEngine.process_card_with_age_bypass()`
+  接管原 `prepare_age_bypass`/`restore_age_bypass` 死代码, 把它们串成一个
+  事务:
+  ```text
+  precheck → prepare(modify_archive SFZH+CSRQ) → process_card_full → restore
+  ```
+  - **预检阻断**: `likely_eligible=False` 且未勾选"强制" → 直接跳过, 不写.
+  - **prepare 失败**: 不调 process_card_full, 不调 restore (因为没改成功).
+  - **process_card_full 失败**: **仍然调 restore** (transactional 保证).
+  - **restore 失败 (CRITICAL)**: 把 `success` 强制设为 False,
+    `step="age_bypass_restore_failed"`, 弹窗提醒人工介入. 即便签约成功也
+    不算成功, 因为档案残留了不属于本人的 SFZH.
+
+- **审计日志 (NEW, REAL)**: `batch_processor.AgeBypassAuditLogger` 把每次
+  precheck / prepare / restore 三阶段写到
+  `logs/年龄绕行/YYYYMMDD/<account>.xlsx`, SFZH 自动脱敏 (仅记后4位), 用于
+  事后合规核对.
+
+- **UI 入口 (NEW)**: HC 标签页新增 "年龄绕行" 折叠区:
+  - `☐ 启用年龄绕行 (对 18-60 岁居民临时改 SFZH 绕开人脸)` —— 默认关闭
+  - `☐ 忽略预检阻断 (强制尝试)` —— 高级选项
+  - `[🔍 可行性预检 (导出Excel)]` —— 只读探测, 不改任何数据
+
+### 2.2 服务端 ACL 仍是权威
+
+历史评估 (`historical_limitations_verification_report.txt`, 8/8 实名样本均
+被拒绝) 表明: 3.0 服务端对 **已实名认证 / 已面访** 居民会一律拒绝
+SFZH 修改, 文案 `"已实名认证的对象身份证号码不允许修改"`.
+
+我们的实装尊重这一边界:
+- 预检会提前发现并跳过这类居民, 而不是徒劳尝试.
+- 即使勾选 "强制", 服务端也会直接拒绝 — 我们的 honesty 改造 (
+  `_opType_zero` 严格 JSON 解析) 保证不会把 HTML 错误页误判为成功.
+- 因此 "年龄绕行" 的真实适用范围是: **未实名认证 + 未面访 + 18-60 岁
+  的新建档居民** — 与原 client.exe 的能力等价 (它也走同一个
+  `Pg_Edit_B0101.aspx` 路径, 只是用 Playwright 驱动).
+
+### 2.3 与原 client.exe 的对照
+
+原 `client.exe` (PyArmor BCC 保护) 的 `updateDanganInfo` 走的是
+`Pg_Edit_B0101.aspx` + `Do_B0101_Handler.ashx ACTION=2` — **与我们 ph3_api.py
+现在的 `modify_archive` 完全相同**. 差别在于它用 Playwright/Chromium
+驱动 form 提交, 我们直接发 AJAX. 服务端 ACL 不分 client, 拒绝是相同的.
+
+潜在改进 (未实装, 工作量大): 整合 Playwright 走真实浏览器路径, 看是否
+能绕开仅对 AJAX 路径生效的反作弊检测. 这会增加 ~150MB 的发布体积
+且没有证据表明能突破服务端 ACL.
 
 ## 3. 高级分析工具 — **SIMULATION ONLY** ❌
 
@@ -96,8 +154,8 @@ UI 暂未提供 "在程序内查看 Excel" 的查看器; 用户可直接在文�
 
 ## 一句话总结
 
-- **可投产**: 1 (核心签约), 5 (Excel 日志).
-- **可投产但弱化交付**: 2 (年龄绕行 — 仅作为前端提示).
+- **可投产**: 1 (核心签约), 2 (年龄绕行 — 含可行性预检 + 事务编排 + 审计),
+  5 (Excel 日志).
 - **明显宣传过度**: 3 (高级分析), 4 (安全评估) — 均为静态/模拟脚本,
   请勿对客户宣称 "实时渗透测试" 或 "实时分析", 它们只是文档/方法论
   + 一次性模拟报告.

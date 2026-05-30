@@ -621,6 +621,87 @@ class SuccessLogger:
             return 0
 
 # ---------------------------------------------------------------------------
+# 年龄绕行审计日志 — 合规留痕
+# ---------------------------------------------------------------------------
+#
+# 为何独立: 年龄绕行 (修改 SFZH) 是数据写操作, 即使全程恢复成功, 也必须有
+# 一份不可重放的审计记录, 因为它涉及对生产居民档案的临时修改. 我们把它
+# 写到 logs/年龄绕行/YYYYMMDD/<account>.xlsx, 与 success/failure 日志分离,
+# 方便事后人工核对.
+
+class AgeBypassAuditLogger:
+    """记录每一次年龄绕行尝试的全部三个阶段 (precheck → prepare → restore).
+
+    每条审计行包含: 时间戳, 阶段, 居民信息 (脱敏), 是否成功, 错误信息.
+    """
+
+    def __init__(self,
+                 account: str = "",
+                 audit_dir: str = "logs/年龄绕行"):
+        self.audit_dir = Path(audit_dir)
+        self.audit_dir.mkdir(parents=True, exist_ok=True)
+        self.account = SuccessLogger._safe_account(account or "unknown")
+        self._lock = threading.Lock()
+        logger.info(f"年龄绕行审计记录器初始化完成: {self.audit_dir}")
+
+    def _today_file(self) -> Path:
+        d = self.audit_dir / date.today().strftime("%Y%m%d")
+        d.mkdir(parents=True, exist_ok=True)
+        return d / f"{self.account}.xlsx"
+
+    def log_attempt(self, event: Dict[str, Any]) -> None:
+        """以一行追加一次尝试; 阶段由 ``event['phase']`` 给出.
+
+        识别的 phase 值: ``precheck`` / ``prepare`` / ``restore``.
+        其他字段透传; 调用方应已对 SFZH 等敏感字段脱敏 (建议仅传后4位).
+        """
+        try:
+            row: Dict[str, Any] = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "account": self.account,
+                "phase": event.get("phase", ""),
+            }
+            row.update(event)
+            log_file = self._today_file()
+            with self._lock:
+                if log_file.exists():
+                    try:
+                        existing_df = pd.read_excel(log_file)
+                        existing_data = existing_df.to_dict("records")
+                    except Exception as e:
+                        logger.warning(f"年龄绕行审计读取失败, 重建: {e}")
+                        existing_data = []
+                else:
+                    existing_data = []
+                existing_data.append(row)
+                pd.DataFrame(existing_data).to_excel(log_file, index=False)
+        except Exception as e:
+            logger.error(f"年龄绕行审计写入失败: {e}")
+
+    def export_eligibility_report(self,
+                                   eligibilities: List[Any],
+                                   filename_hint: str = "可行性预检") -> str:
+        """把一批 ``AgeBypassEligibility`` 序列化为单个 Excel 报告."""
+        try:
+            d = self.audit_dir / "预检报告"
+            d.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = d / f"{self.account}_{filename_hint}_{ts}.xlsx"
+            rows: List[Dict[str, str]] = []
+            for e in eligibilities:
+                if hasattr(e, "to_audit_row"):
+                    rows.append(e.to_audit_row())
+            if not rows:
+                rows = [{"info": "无预检结果"}]
+            pd.DataFrame(rows).to_excel(log_file, index=False)
+            logger.info(f"年龄绕行预检报告已导出: {log_file}")
+            return str(log_file)
+        except Exception as e:
+            logger.error(f"导出预检报告失败: {e}")
+            return ""
+
+
+# ---------------------------------------------------------------------------
 # 批量签约处理器 (与原始 client.exe 接口兼容)
 # ---------------------------------------------------------------------------
 

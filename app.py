@@ -24,7 +24,7 @@ if getattr(sys, "frozen", False):
 from ph3_api import PH3Client, Patient, ProvinceMatch, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
 from sign_engine import (
-    SigningEngine, FullSignResult,
+    SigningEngine, FullSignResult, AgeBypassEligibility,
     get_age_from_id, needs_age_bypass,
     validate_id_card, generate_bypass_sfzh,
 )
@@ -36,7 +36,7 @@ from proxy_capture import (
 )
 from license_client import LicenseClient
 from config_manager import ConfigManager
-from batch_processor import BatchProcessor, SuccessLogger
+from batch_processor import BatchProcessor, SuccessLogger, AgeBypassAuditLogger
 
 VERSION = "3.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
@@ -1420,6 +1420,58 @@ class GulfSignApp(tk.Tk):
             text="全自动: 绕过人脸 → 查询状态 → 创建合同(可选) → 确认签约  |  支持状态5(医生申请) + 状态6(居民申请) + 未签约",
             foreground="gray",
         ).pack(side=tk.LEFT)
+
+        # ----- 年龄绕行 (高级, 默认关闭) -----
+        # 服务端会拒绝对 "已实名认证 / 已面访" 居民的 SFZH 修改, 因此本功能
+        # 只对未实名 / 未面访的新建档居民有意义. 启用前请先用 "可行性预检".
+        r2 = ttk.LabelFrame(frame, text=" 年龄绕行 (高级) ", padding=4)
+        r2.pack(fill=tk.X, pady=(6, 0))
+
+        self.var_hc_age_bypass = tk.BooleanVar(
+            value=bool(self._cfg.get("enable_age_bypass", False))
+        )
+        ttk.Checkbutton(
+            r2,
+            text="启用年龄绕行 (对 18-60 岁居民临时改 SFZH 绕开人脸)",
+            variable=self.var_hc_age_bypass,
+            command=self._on_hc_age_bypass_toggle,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.var_hc_age_bypass_force = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            r2,
+            text="忽略预检阻断 (强制尝试)",
+            variable=self.var_hc_age_bypass_force,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_hc_age_precheck = ttk.Button(
+            r2, text="🔍 可行性预检 (导出Excel)",
+            command=self._on_hc_age_bypass_precheck,
+        )
+        self.btn_hc_age_precheck.pack(side=tk.RIGHT, padx=(8, 0))
+
+        ttk.Label(
+            r2,
+            text="(对所选居民只读探测; 已实名/已面访者通常会被服务端拒绝修改)",
+            foreground="gray",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+    def _on_hc_age_bypass_toggle(self):
+        """同步年龄绕行复选框状态到配置 + 警告."""
+        on = bool(self.var_hc_age_bypass.get())
+        self._cfg["enable_age_bypass"] = on
+        try:
+            self._save_current_config()
+        except Exception:
+            pass
+        if on:
+            self._hc_log(
+                "⚠ 年龄绕行已启用: 将对 18-60 岁居民尝试临时改 SFZH。请确保仅"
+                "用于未实名/未面访的新建档居民 — 已实名认证档案会被服务端拒绝。",
+                "warn",
+            )
+        else:
+            self._hc_log("年龄绕行已关闭", "info")
 
     def _build_hc_log(self, parent):
         frame = ttk.LabelFrame(parent, text=" 运行日志 ", padding=4)
@@ -3675,7 +3727,31 @@ class GulfSignApp(tk.Tk):
             "start_date": self.var_hc_start.get().strip(),
             "end_date": self.var_hc_end.get().strip(),
             "auto_create": auto_create,
+            "enable_age_bypass": bool(self.var_hc_age_bypass.get()),
+            "age_bypass_force": bool(self.var_hc_age_bypass_force.get()),
+            # PH3 登录密码: 用于全省个案查询的权威实名/面访标志位检测
+            "ph3_password": self._cfg.get("password", "") or self.var_password.get(),
         }
+
+        if sign_config["enable_age_bypass"]:
+            self._hc_log(
+                "年龄绕行: 已启用 (强制=%s) — 18-60 岁居民将临时改 SFZH" %
+                ("是" if sign_config["age_bypass_force"] else "否"),
+                "warn",
+            )
+            if not getattr(self.client, "fully_authenticated", False):
+                messagebox.showwarning(
+                    "提示",
+                    "年龄绕行需要先完整登录 3.0 系统 (含扫码认证)。\n\n"
+                    "请先在「登录」标签页完成登录与「同步配置」。",
+                )
+                self._hc_confirming = False
+                self.btn_hc_confirm.configure(state=tk.NORMAL)
+                self.btn_hc_stop.configure(state=tk.DISABLED)
+                self.btn_hc_connect.configure(state=tk.NORMAL)
+                if self.hc_client.connected:
+                    self.btn_hc_refresh.configure(state=tk.NORMAL)
+                return
 
         def worker():
             self._hc_confirm_worker(targets, sign_config)
@@ -3687,7 +3763,22 @@ class GulfSignApp(tk.Tk):
         fail = 0
         skipped = 0
         created = 0
+        bypass_blocked = 0
+        bypass_critical = 0
         t0 = time.time()
+
+        # 仅当用户启用年龄绕行时初始化审计 logger
+        audit_logger: Optional[AgeBypassAuditLogger] = None
+        if config.get("enable_age_bypass"):
+            try:
+                audit_logger = AgeBypassAuditLogger(
+                    account=self._cfg.get("username", "unknown")
+                )
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._hc_log(
+                    "年龄绕行审计 logger 初始化失败: %s (将不写审计日志)" % err,
+                    "warn",
+                ))
 
         for i, card in enumerate(targets):
             if self._hc_stop.is_set():
@@ -3705,16 +3796,64 @@ class GulfSignApp(tk.Tk):
                 ),
             )
 
-            result = self.sign_engine.process_card_full(
-                card,
-                orgcode=config["orgcode"],
-                team_name=config.get("team_name", ""),
-                doctor_name=config.get("doctor_name", ""),
-                start_date=config.get("start_date", ""),
-                end_date=config.get("end_date", ""),
-                auto_create=config.get("auto_create", True),
-                log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+            use_bypass = (
+                config.get("enable_age_bypass", False)
+                and len(card.id_card or "") == 18
+                and needs_age_bypass(card.id_card)
             )
+
+            if use_bypass:
+                # 取得 PH3 person_id (B0101.GUID).
+                # 优先走全省个案查询 (用 SFZH + 密码) — 一次返回 person_id +
+                # 权威实名/面访标志位; 失败再 fallback 到本地机构内 query_patients.
+                person_id = self._resolve_ph3_person_id_by_sfzh(
+                    card.id_card,
+                    config.get("ph3_password", ""),
+                )
+                if not person_id:
+                    person_id = self._resolve_ph3_person_id(
+                        card.id_card, card.name
+                    )
+                if not person_id:
+                    self.after(
+                        0,
+                        lambda c=card: self._hc_log(
+                            "  ⊘ 未在 3.0 档案中找到 %s — 跳过年龄绕行, 走标准流程" % c.name,
+                            "warn",
+                        ),
+                    )
+                    use_bypass = False
+
+            if use_bypass:
+                result = self.sign_engine.process_card_with_age_bypass(
+                    card,
+                    person_id=person_id,
+                    orgcode=config["orgcode"],
+                    team_name=config.get("team_name", ""),
+                    doctor_name=config.get("doctor_name", ""),
+                    start_date=config.get("start_date", ""),
+                    end_date=config.get("end_date", ""),
+                    auto_create=config.get("auto_create", True),
+                    log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+                    audit_logger=audit_logger,
+                    force=bool(config.get("age_bypass_force", False)),
+                    province_password=config.get("ph3_password", ""),
+                )
+                if result.step == "age_bypass_blocked":
+                    bypass_blocked += 1
+                if result.step == "age_bypass_restore_failed":
+                    bypass_critical += 1
+            else:
+                result = self.sign_engine.process_card_full(
+                    card,
+                    orgcode=config["orgcode"],
+                    team_name=config.get("team_name", ""),
+                    doctor_name=config.get("doctor_name", ""),
+                    start_date=config.get("start_date", ""),
+                    end_date=config.get("end_date", ""),
+                    auto_create=config.get("auto_create", True),
+                    log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+                )
 
             if result.step == "already_signed":
                 tag = "skipped"
@@ -3750,7 +3889,8 @@ class GulfSignApp(tk.Tk):
             self.after(0, _update_row)
             time.sleep(0.3)
 
-        def _done(s=success, f=fail, sk=skipped, cr=created):
+        def _done(s=success, f=fail, sk=skipped, cr=created,
+                  bb=bypass_blocked, bc=bypass_critical):
             self._hc_confirming = False
             self.btn_hc_confirm.configure(state=tk.NORMAL)
             self.btn_hc_stop.configure(state=tk.DISABLED)
@@ -3766,8 +3906,182 @@ class GulfSignApp(tk.Tk):
                 ),
                 "ok" if f == 0 else "warn",
             )
+            if bb or bc:
+                self._hc_log(
+                    "年龄绕行: 预检阻断 %d 人, 严重 (恢复失败) %d 人 — "
+                    "审计日志在 logs/年龄绕行/" % (bb, bc),
+                    "err" if bc else "warn",
+                )
+            if bc:
+                # 严重: 档案残留改过的 SFZH, 必须人工恢复
+                messagebox.showwarning(
+                    "严重: 档案恢复失败",
+                    "%d 个居民的 SFZH 已被修改但未能恢复!\n\n"
+                    "请立刻登录公卫3.0系统手动核对/恢复。\n"
+                    "审计日志: logs/年龄绕行/" % bc,
+                )
 
         self.after(0, _done)
+
+    def _resolve_ph3_person_id_by_sfzh(self, sfzh: str, password: str) -> str:
+        """通过全省个案查询拿 person_id (跨机构) — 优先路径, 一次拿权威标志."""
+        if not sfzh or len(sfzh) != 18 or not password:
+            return ""
+        if not getattr(self.client, "fully_authenticated", False):
+            return ""
+        try:
+            matches, _total, _err = self.client.query_province_wide(
+                sfzh=sfzh, password=password,
+            )
+            for m in matches:
+                if (m.id_card or "").strip() == sfzh and m.person_id:
+                    return m.person_id
+        except Exception:
+            pass
+        return ""
+
+    def _resolve_ph3_person_id(self, sfzh: str, name: str = "") -> str:
+        """通过 SFZH 反查 3.0 档案的 GUID (B0101.GUID).
+
+        在年龄绕行流程中, 我们需要 PH3 的 person_id 才能调 modify_archive.
+        实现: 调用 PH3 的全省个案查询 API (复用现有 ProvinceLookup 路径).
+
+        失败时返回空字符串 (调用方应回退到不绕行的标准流程).
+        """
+        if not sfzh or len(sfzh) != 18:
+            return ""
+        if not getattr(self.client, "fully_authenticated", False):
+            return ""
+        try:
+            # 机构内列表查询 (`query_patients` 通过 extra_filters 支持 SFZH 过滤)
+            # _DEFAULT_QUERY_FORM 里 SFZH 字段就是过滤键
+            patients, _total = self.client.query_patients(
+                page=1, extra_filters={"SFZH": sfzh},
+            )
+            for p in patients:
+                if (p.id_card or "").strip() == sfzh and p.person_id:
+                    return p.person_id
+        except Exception:
+            pass
+        return ""
+
+    def _on_hc_age_bypass_precheck(self):
+        """对当前选中的健康卡做只读年龄绕行可行性预检 + 导出 Excel."""
+        if not getattr(self.client, "fully_authenticated", False):
+            messagebox.showwarning(
+                "提示",
+                "可行性预检需要已完整登录 3.0 系统 (含扫码认证)。\n"
+                "请先在「登录」标签页完成登录与「同步配置」。",
+            )
+            return
+
+        targets = [c for c in self._hc_cards if c.health_card_id in self._hc_selected]
+        if not targets:
+            messagebox.showwarning("提示", "请先在表格中勾选要预检的健康卡")
+            return
+
+        candidates = [c for c in targets if needs_age_bypass(c.id_card or "")]
+        if not candidates:
+            messagebox.showinfo(
+                "提示",
+                "所选 %d 张卡均不在 18-60 岁范围, 不需要年龄绕行。" % len(targets),
+            )
+            return
+
+        if not messagebox.askyesno(
+            "确认预检",
+            "将对 %d 张 18-60 岁健康卡执行只读资格预检。\n\n"
+            "操作不会修改任何数据, 仅加载档案并导出 Excel 报告。\n"
+            "继续吗？" % len(candidates),
+        ):
+            return
+
+        self.btn_hc_age_precheck.configure(state=tk.DISABLED)
+        self._hc_log("=" * 50, "info")
+        self._hc_log("年龄绕行可行性预检: %d 人" % len(candidates), "info")
+
+        account = self._cfg.get("username", "unknown")
+        ph3_password = self._cfg.get("password", "") or self.var_password.get()
+
+        def worker():
+            try:
+                audit = AgeBypassAuditLogger(account=account)
+            except Exception as e:
+                self._safe_after(lambda err=str(e): self._hc_log(
+                    "审计 logger 初始化失败: %s" % err, "warn"
+                ))
+                audit = None
+
+            tlist = [
+                {"name": c.name, "sfzh": c.id_card,
+                 # 全省查询能用 SFZH 拿到 person_id, 因此本地反查可省略
+                 "person_id": ""}
+                for c in candidates
+            ]
+
+            def progress(i, total, e):
+                pid = e.person_id or "(未在3.0找到)"
+                tag = "ok" if e.likely_eligible else (
+                    "warn" if not e.error else "err"
+                )
+                self._safe_after(
+                    lambda i=i, total=total, n=e.name, p=pid,
+                    s=e.status, r=e.block_reason, er=e.error, t=tag:
+                    self._hc_log(
+                        "  [%d/%d] %s (%s) → %s%s" % (
+                            i, total, n or "?", p[:8] + "…" if p and p != "(未在3.0找到)" else p,
+                            s, ((" — " + (r or er)) if (r or er) else ""),
+                        ),
+                        t,
+                    )
+                )
+
+            results = self.sign_engine.batch_check_age_bypass_eligibility(
+                tlist, progress_cb=progress,
+                province_password=ph3_password,
+            )
+
+            export_path = ""
+            if audit:
+                try:
+                    export_path = audit.export_eligibility_report(results)
+                except Exception:
+                    export_path = ""
+
+            elig_count = sum(1 for r in results if r.likely_eligible and r.needs_bypass)
+            blocked_count = sum(
+                1 for r in results if not r.likely_eligible and r.needs_bypass
+            )
+            err_count = sum(1 for r in results if r.error)
+
+            def done():
+                self.btn_hc_age_precheck.configure(state=tk.NORMAL)
+                self._hc_log(
+                    "预检完成: 可绕行 %d, 预测被阻断 %d, 错误 %d" % (
+                        elig_count, blocked_count, err_count,
+                    ),
+                    "ok" if blocked_count == 0 and err_count == 0 else "warn",
+                )
+                if export_path:
+                    self._hc_log("Excel 报告: %s" % export_path, "info")
+                    if messagebox.askyesno(
+                        "预检完成",
+                        "已导出 Excel 报告:\n%s\n\n是否打开所在文件夹?" % export_path,
+                    ):
+                        try:
+                            folder = os.path.dirname(export_path)
+                            if sys.platform == "win32":
+                                os.startfile(folder)
+                            elif sys.platform == "darwin":
+                                os.system('open "%s"' % folder)
+                            else:
+                                os.system('xdg-open "%s"' % folder)
+                        except Exception:
+                            pass
+
+            self._safe_after(done)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_hc_stop(self):
         self._hc_stop.set()
