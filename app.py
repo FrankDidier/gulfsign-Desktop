@@ -4214,18 +4214,19 @@ class GulfSignApp(tk.Tk):
         
         def worker():
             try:
-                # 构建登录URL
-                login_url = f"{base_url}/login.aspx"
+                # 构建登录URL - 使用FormMain.aspx触发SSO重定向
+                # 这是PH3Client使用的正确登录流程
+                login_url = f"{base_url.rstrip('/')}/FormMain.aspx"
                 
-                if account:
-                    # 尝试预填充账号
-                    login_url = f"{login_url}?user={quote(account)}"
+                # 注意：FormMain.aspx不接受user参数
+                # 它会自动重定向到SSO认证页面
+                # 用户需要在浏览器中手动输入账号密码
                 
                 # 打开浏览器
                 webbrowser.open(login_url)
                 
                 success = True
-                message = f"已打开浏览器: {login_url}\n请在浏览器中完成登录"
+                message = f"已打开浏览器: {login_url}\n请在浏览器中完成SSO登录"
                 
                 # 保存配置（即使没有密码，也保存账号和系统地址）
                 if account or base_url:
@@ -4242,7 +4243,6 @@ class GulfSignApp(tk.Tk):
             self.after(0, lambda: self._web_login_result(success, message))
         
         threading.Thread(target=worker, daemon=True).start()
-    
     def _web_login_result(self, success: bool, message: str):
         """网页登录结果"""
         self.enhanced_web_login_btn.configure(state=tk.NORMAL)
@@ -4270,35 +4270,167 @@ class GulfSignApp(tk.Tk):
             messagebox.showerror("错误", message)
     
     def _sync_login_configuration(self):
-        """同步配置"""
+        """同步配置 - 实际从PH3Client会话中提取机构信息"""
         self.enhanced_status_var.set("正在同步配置信息...")
         self.enhanced_sync_btn.configure(state=tk.DISABLED)
         
         def worker():
-            # 模拟配置同步
-            time.sleep(2)
-            
-            # 这里应该从实际的会话中提取信息
-            # 暂时使用模拟数据
-            extracted = {
-                "org_code": "430726000001",
-                "org_name": "测试机构",
-                "team_code": "01",
-                "team_name": "测试团队",
-                "doctor_code": "WS001",
-                "doctor_name": "测试医生",
-                "synced_at": datetime.now().isoformat()
-            }
-            
-            # 更新配置
-            self._cfg.update(extracted)
-            
-            # 更新UI显示
-            self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
-            
-            self.after(0, lambda: self._sync_login_complete(extracted))
+            try:
+                # 获取当前页面HTML
+                current_page_html = self._get_current_page_html()
+                
+                if not current_page_html:
+                    self.after(0, lambda: self._sync_login_failed("无法获取当前页面，请确保已在浏览器中登录"))
+                    return
+                
+                # 从HTML中提取机构信息
+                extracted = self._extract_org_info_from_html(current_page_html)
+                
+                # 如果机构代码为空，尝试其他方法
+                if not extracted.get("org_code"):
+                    # 尝试从客户端属性中获取
+                    if hasattr(self.client, 'org_code') and self.client.org_code:
+                        extracted["org_code"] = self.client.org_code
+                    
+                    if hasattr(self.client, 'org_name') and self.client.org_name:
+                        extracted["org_name"] = self.client.org_name
+                    
+                    if hasattr(self.client, 'doctor_name') and self.client.doctor_name:
+                        extracted["doctor_name"] = self.client.doctor_name
+                    
+                    if hasattr(self.client, 'team_name') and self.client.team_name:
+                        extracted["team_name"] = self.client.team_name
+                
+                # 添加同步时间戳
+                extracted["synced_at"] = datetime.now().isoformat()
+                extracted["extraction_method"] = "actual_session"
+                
+                # 更新配置
+                self._cfg.update(extracted)
+                
+                # 更新UI显示
+                self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
+                
+                # 保存配置
+                self._save_current_config()
+                
+                self.after(0, lambda: self._sync_login_complete(extracted))
+                
+            except Exception as e:
+                error_msg = f"同步配置失败: {str(e)}"
+                print(f"❌ {error_msg}")
+                self.after(0, lambda: self._sync_login_failed(error_msg))
         
         threading.Thread(target=worker, daemon=True).start()
+    
+    def _get_current_page_html(self) -> str:
+        """获取当前页面HTML"""
+        try:
+            # 尝试访问主页面
+            response = self.client.session.get(self.client._url("/FormMain.aspx"), timeout=30)
+            if response.status_code == 200:
+                return response.text
+            
+            # 如果失败，尝试其他页面
+            response = self.client.session.get(self.client._url("/Index.aspx"), timeout=30)
+            if response.status_code == 200:
+                return response.text
+                
+        except Exception as e:
+            print(f"❌ 获取当前页面失败: {e}")
+        
+        return ""
+    
+    def _extract_org_info_from_html(self, html: str) -> dict:
+        """从HTML中提取机构信息"""
+        import re
+        
+        result = {
+            "org_code": "",
+            "org_name": "",
+            "team_code": "",
+            "team_name": "",
+            "doctor_code": "",
+            "doctor_name": ""
+        }
+        
+        if not html:
+            return result
+        
+        # 尝试多种机构代码模式
+        org_patterns = [
+            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*:\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*:\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*:\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""var\s+orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""var\s+ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            r"""type\s*=\s*['"]hidden['"]\s+name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            r"""data-orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""org[^>]*?['"](\d{10,})['"]""",
+        ]
+        
+        # 提取机构代码
+        for pattern in org_patterns:
+            org_m = re.search(pattern, html, re.IGNORECASE)
+            if org_m:
+                result["org_code"] = org_m.group(1)
+                break
+        
+        # 提取机构名称
+        org_name_patterns = [
+            r"""orgName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""ORGNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""机构名称[^>]*?['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in org_name_patterns:
+            name_m = re.search(pattern, html, re.IGNORECASE)
+            if name_m:
+                result["org_name"] = name_m.group(1)
+                break
+        
+        # 提取医生信息
+        doctor_patterns = [
+            r"""doctorName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""DOCTORNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""医生姓名[^>]*?['"]([^'"]+)['"]""",
+            r"""<span[^>]*?id="lblDoctor"[^>]*?>([^<]+)</span>""",
+        ]
+        
+        for pattern in doctor_patterns:
+            doctor_m = re.search(pattern, html, re.IGNORECASE)
+            if doctor_m:
+                result["doctor_name"] = doctor_m.group(1)
+                break
+        
+        # 提取团队信息
+        team_patterns = [
+            r"""teamName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""TEAMNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""团队名称[^>]*?['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in team_patterns:
+            team_m = re.search(pattern, html, re.IGNORECASE)
+            if team_m:
+                result["team_name"] = team_m.group(1)
+                break
+        
+        return result
+    
+    def _sync_login_failed(self, error_message: str):
+        """同步配置失败"""
+        self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        self.enhanced_status_var.set("同步失败")
+        messagebox.showerror("同步失败", f"配置同步失败:\n\n{error_message}\n\n请确保：\n1. 已在浏览器中登录公卫3.0系统\n2. 登录的账号有权限访问当前机构\n3. 网络连接正常")
     
     def _sync_login_complete(self, extracted: Dict[str, Any]):
         """同步完成"""

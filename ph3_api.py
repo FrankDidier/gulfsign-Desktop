@@ -274,6 +274,22 @@ class PH3Client:
         return bool(self.token_en and self.token_th)
 
     def _extract_user_info(self, html: str):
+        # region debug-point extract-user-info-start
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'extract-user-info',
+                'message': '开始提取用户信息',
+                'details': {
+                    'html_length': len(html) if html else 0,
+                    'html_preview': html[:200] if html else ''
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+        
         # 尝试多种机构代码模式
         org_patterns = [
             # 模式1: ORGCODE = '431122012345678' 或 orgcode = "431122012345678"
@@ -316,6 +332,24 @@ class PH3Client:
             if org_m:
                 self.org_code = org_m.group(1)
                 logger.info(f"机构代码提取成功 (模式{i}): {self.org_code}")
+                
+                # region debug-point org-extracted
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'info',
+                        'category': 'extract-user-info',
+                        'message': '机构代码提取成功',
+                        'details': {
+                            'pattern_index': i,
+                            'org_code': self.org_code,
+                            'match_text': org_m.group(0)[:100] if org_m.group(0) else ''
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
+                
                 extracted = True
                 break
         
@@ -325,6 +359,22 @@ class PH3Client:
             org_snippets = re.findall(r'[^>]*org[^>]*', html, re.IGNORECASE)
             if org_snippets:
                 logger.info(f"找到包含'org'的片段: {org_snippets[:3]}")
+            
+            # region debug-point org-extraction-failed
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'warning',
+                    'category': 'extract-user-info',
+                    'message': '机构代码提取失败',
+                    'details': {
+                        'org_snippets_count': len(org_snippets) if org_snippets else 0,
+                        'org_snippets_preview': org_snippets[:3] if org_snippets else []
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
         
         # 尝试多种医生姓名模式
         name_patterns = [
@@ -362,11 +412,44 @@ class PH3Client:
             if name_m:
                 self.doctor_name = name_m.group(1).strip()
                 logger.info(f"医生姓名提取成功 (模式{i}): {self.doctor_name}")
+                
+                # region debug-point name-extracted
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'info',
+                        'category': 'extract-user-info',
+                        'message': '医生姓名提取成功',
+                        'details': {
+                            'pattern_index': i,
+                            'doctor_name': self.doctor_name,
+                            'match_text': name_m.group(0)[:100] if name_m.group(0) else ''
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
+                
                 name_extracted = True
                 break
         
         if not name_extracted:
             logger.warning("医生姓名提取失败，未找到匹配的模式")
+            
+            # region debug-point name-extraction-failed
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'warning',
+                    'category': 'extract-user-info',
+                    'message': '医生姓名提取失败',
+                    'details': {
+                        'name_patterns_tried': len(name_patterns)
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
         
         # 尝试提取团队信息
         team_patterns = [
@@ -398,15 +481,87 @@ class PH3Client:
             if team_m:
                 self.team_name = team_m.group(1).strip()
                 logger.info(f"团队名称提取成功 (模式{i}): {self.team_name}")
+                
+                # region debug-point team-extracted
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'info',
+                        'category': 'extract-user-info',
+                        'message': '团队名称提取成功',
+                        'details': {
+                            'pattern_index': i,
+                            'team_name': self.team_name,
+                            'match_text': team_m.group(0)[:100] if team_m.group(0) else ''
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
+                
                 team_extracted = True
                 break
         
         if not team_extracted:
             logger.warning("团队名称提取失败，未找到匹配的模式")
+            
+            # region debug-point team-extraction-failed
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'warning',
+                    'category': 'extract-user-info',
+                    'message': '团队名称提取失败',
+                    'details': {
+                        'team_patterns_tried': len(team_patterns)
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
+        
+        # region debug-point extract-user-info-summary
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'extract-user-info',
+                'message': '用户信息提取完成',
+                'details': {
+                    'org_code': self.org_code,
+                    'org_name': self.org_name,
+                    'doctor_name': self.doctor_name,
+                    'team_name': self.team_name,
+                    'org_extracted': extracted,
+                    'name_extracted': name_extracted,
+                    'team_extracted': team_extracted
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
 
     # ---- 登录 ----
 
     def login(self, base_url: str, account: str, password: str) -> Tuple[bool, str]:
+        # region debug-point login-start
+        try:
+            import requests as debug_requests
+            debug_data = {
+                'base_url': base_url,
+                'account': account,
+                'password_length': len(password) if password else 0
+            }
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'login',
+                'message': '登录开始',
+                'details': debug_data
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+        
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.trust_env = False
@@ -425,6 +580,24 @@ class PH3Client:
             page = self.session.get(
                 self._url("/FormMain.aspx"), timeout=self._timeout
             )
+            
+            # region debug-point page-loaded
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'login',
+                    'message': '页面加载完成',
+                    'details': {
+                        'url': page.url,
+                        'status_code': page.status_code,
+                        'content_length': len(page.text) if page.text else 0,
+                        'has_sso_redirect': 'sso.hnhfpc.gov.cn' in page.url
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
             
             # 检查是否被重定向到SSO服务器
             if "sso.hnhfpc.gov.cn" in page.url:
@@ -477,16 +650,138 @@ class PH3Client:
             import json as _json
             try:
                 obj = _json.loads(resp.text)
+                
+                # region debug-point login-response
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'info',
+                        'category': 'login',
+                        'message': '登录响应解析',
+                        'details': {
+                            'response_text': resp.text[:500] if resp.text else '',
+                            'opType': obj.get('opType'),
+                            'msg': obj.get('msg'),
+                            'status_code': resp.status_code
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
+                
             except Exception:
+                # region debug-point login-response-error
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'error',
+                        'category': 'login',
+                        'message': '登录响应解析失败',
+                        'details': {
+                            'response_text': resp.text[:500] if resp.text else '',
+                            'status_code': resp.status_code
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
                 return False, "登录异常：无法解析响应"
 
             op = obj.get("opType")
             if op != 0:
+                # region debug-point login-failed
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'error',
+                        'category': 'login',
+                        'message': '登录失败',
+                        'details': {
+                            'opType': op,
+                            'msg': obj.get('msg', '未知错误')
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
                 return False, "登录失败：%s" % obj.get("msg", "未知错误")
+
+            # 检查是否需要二维码验证
+            msg_value = obj.get("msg")
+            try:
+                msg_int = int(msg_value) if msg_value else 0
+            except:
+                msg_int = 0
+            
+            # region debug-point qr-check
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'login',
+                    'message': '检查二维码验证需求',
+                    'details': {
+                        'msg_value': msg_value,
+                        'msg_int': msg_int,
+                        'requires_qr': msg_int <= 4
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
+            
+            if msg_int <= 4:
+                # 需要二维码验证
+                logger.info(f"需要二维码验证 (msg={msg_int})")
+                
+                # 设置登录状态为需要验证
+                self.logged_in = True
+                self.doctor_name = "需要二维码验证"
+                
+                # 提供清晰的错误信息和解决方案
+                error_msg = f"登录成功但需要二维码验证 (msg={msg_int})"
+                solution = "请使用网页登录功能，在浏览器中完成二维码验证"
+                
+                # region debug-point qr-required
+                try:
+                    import requests as debug_requests
+                    debug_requests.post('http://localhost:5680/log', json={
+                        'level': 'warning',
+                        'category': 'login',
+                        'message': '需要二维码验证',
+                        'details': {
+                            'msg_int': msg_int,
+                            'error_msg': error_msg,
+                            'solution': solution
+                        }
+                    }, timeout=2)
+                except:
+                    pass
+                # endregion
+                
+                return True, f"{error_msg}\n{solution}"
 
             main_resp = self.session.get(
                 self._url("/FormMain.aspx"), timeout=self._timeout
             )
+            
+            # region debug-point main-page-loaded
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'login',
+                    'message': '主页面加载完成',
+                    'details': {
+                        'url': main_resp.url,
+                        'status_code': main_resp.status_code,
+                        'content_length': len(main_resp.text) if main_resp.text else 0,
+                        'is_main_page': 'FormMain.aspx' in main_resp.url
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
 
             if not self._extract_tokens(main_resp.text):
                 return False, "登录成功但未能提取加密Token"
@@ -502,6 +797,27 @@ class PH3Client:
             info = self.doctor_name or account
             if self.org_name:
                 info += " (%s)" % self.org_name
+            
+            # region debug-point login-success
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'login',
+                    'message': '登录成功',
+                    'details': {
+                        'account': account,
+                        'org_code': self.org_code,
+                        'org_name': self.org_name,
+                        'doctor_name': self.doctor_name,
+                        'team_name': self.team_name,
+                        'logged_in': self.logged_in
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
+            
             return True, "登录成功 — %s" % info
 
         except requests.exceptions.ConnectionError:
@@ -546,6 +862,25 @@ class PH3Client:
         page: int = 1,
         extra_filters: Optional[Dict] = None,
     ) -> Tuple[List[Patient], int]:
+        # region debug-point query-start
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'query',
+                'message': '查询开始',
+                'details': {
+                    'logged_in': self.logged_in,
+                    'status': status,
+                    'org_code': org_code or self.org_code,
+                    'page': page,
+                    'has_extra_filters': bool(extra_filters)
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+        
         if not self.logged_in:
             return [], 0
 
@@ -569,13 +904,69 @@ class PH3Client:
         if extra_filters:
             form.update(extra_filters)
 
+        # region debug-point query-params
         try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'query',
+                'message': '查询参数',
+                'details': {
+                    'params': params,
+                    'form_keys': list(form.keys()),
+                    'form_CONTRACT_STATES': form.get('CONTRACT_STATES'),
+                    'form_PAGEINDEX': form.get('PAGEINDEX'),
+                    'token_en_length': len(self.token_en) if self.token_en else 0,
+                    'token_th_length': len(self.token_th) if self.token_th else 0
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+
+        try:
+            url = self._url("/Sys_JCWS/b0105/Do_B0105_Handler.ashx")
+            # region debug-point query-url
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'query',
+                    'message': '查询URL',
+                    'details': {
+                        'url': url,
+                        'base_url': self.base_url
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
+            
             resp = self.session.post(
-                self._url("/Sys_JCWS/b0105/Do_B0105_Handler.ashx"),
+                url,
                 params=params,
                 data=form,
                 timeout=self._timeout,
             )
+            
+            # region debug-point query-response
+            try:
+                import requests as debug_requests
+                debug_requests.post('http://localhost:5680/log', json={
+                    'level': 'info',
+                    'category': 'query',
+                    'message': '查询响应',
+                    'details': {
+                        'status_code': resp.status_code,
+                        'url': resp.url,
+                        'content_length': len(resp.text) if resp.text else 0,
+                        'content_preview': resp.text[:500] if resp.text else ''
+                    }
+                }, timeout=2)
+            except:
+                pass
+            # endregion
+            
             if resp.status_code != 200:
                 logger.warning("查询返回 HTTP %d", resp.status_code)
                 return [], 0
@@ -607,10 +998,45 @@ class PH3Client:
         return all_pts
 
     def _parse_grid(self, response_text: str) -> Tuple[List[Patient], int]:
+        # region debug-point parse-grid-start
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'parse-grid',
+                'message': '开始解析网格数据',
+                'details': {
+                    'response_length': len(response_text) if response_text else 0,
+                    'response_preview': response_text[:200] if response_text else '',
+                    'has_double_at': '@@' in response_text
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+        
         parts = response_text.split("@@")
         xml_data = parts[0] if parts else response_text
         total_str = parts[1].strip() if len(parts) > 1 else "0"
         total = int(total_str) if total_str.isdigit() else 0
+
+        # region debug-point parse-grid-parts
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'parse-grid',
+                'message': '解析网格部分',
+                'details': {
+                    'parts_count': len(parts),
+                    'xml_data_length': len(xml_data),
+                    'total_str': total_str,
+                    'total': total
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
 
         patients: List[Patient] = []
 
@@ -652,6 +1078,27 @@ class PH3Client:
                 agreement_end=safe(21),
             ))
 
+        # region debug-point parse-grid-result
+        try:
+            import requests as debug_requests
+            debug_requests.post('http://localhost:5680/log', json={
+                'level': 'info',
+                'category': 'parse-grid',
+                'message': '解析网格结果',
+                'details': {
+                    'patients_count': len(patients),
+                    'total': total,
+                    'sample_patient': {
+                        'person_id': patients[0].person_id if patients else None,
+                        'name': patients[0].name if patients else None,
+                        'id_card': patients[0].id_card if patients else None
+                    } if patients else None
+                }
+            }, timeout=2)
+        except:
+            pass
+        # endregion
+        
         return patients, total
 
     # ---- 全省个案查询 ----

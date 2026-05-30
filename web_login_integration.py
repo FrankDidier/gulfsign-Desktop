@@ -79,17 +79,18 @@ class WebLoginIntegration:
         直接跳转到公卫3.0系统登录页面
         """
         try:
-            # 构建登录URL
-            login_url = f"{self.base_url}/login.aspx"
+            # 构建登录URL - 使用FormMain.aspx触发SSO重定向
+            # 这是PH3Client使用的正确登录流程
+            login_url = f"{self.base_url}/FormMain.aspx"
             
-            if account:
-                # 尝试预填充账号
-                login_url = f"{login_url}?user={quote(account)}"
+            # 注意：FormMain.aspx不接受user参数
+            # 它会自动重定向到SSO认证页面
+            # 用户需要在浏览器中手动输入账号密码
             
             # 打开浏览器
             webbrowser.open(login_url)
             
-            return True, f"已打开浏览器: {login_url}\n请在浏览器中完成登录"
+            return True, f"已打开浏览器: {login_url}\n请在浏览器中完成SSO登录"
             
         except Exception as e:
             return False, f"打开网页登录失败: {str(e)}"
@@ -136,7 +137,7 @@ class WebLoginIntegration:
         
         # 4. 检查API端点
         endpoints = [
-            ("登录页面", "/login.aspx"),
+            ("登录页面", "/FormMain.aspx"),
             ("查询接口", "/ajax/queryPatients.ashx"),
             ("签约接口", "/ajax/signContract.ashx"),
         ]

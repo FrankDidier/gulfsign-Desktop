@@ -326,18 +326,19 @@ class EnhancedLoginSection:
             base_url = app.enhanced_url_var.get()
             
             try:
-                # 构建登录URL
-                login_url = f"{base_url}/login.aspx"
+                # 构建登录URL - 使用FormMain.aspx触发SSO重定向
+                # 这是PH3Client使用的正确登录流程
+                login_url = f"{base_url}/FormMain.aspx"
                 
-                if account:
-                    # 尝试预填充账号
-                    login_url = f"{login_url}?user={quote(account)}"
+                # 注意：FormMain.aspx不接受user参数
+                # 它会自动重定向到SSO认证页面
+                # 用户需要在浏览器中手动输入账号密码
                 
                 # 打开浏览器
                 webbrowser.open(login_url)
                 
                 success = True
-                message = f"已打开浏览器: {login_url}\n请在浏览器中完成登录"
+                message = f"已打开浏览器: {login_url}\n请在浏览器中完成SSO登录"
                 
             except Exception as e:
                 success = False
