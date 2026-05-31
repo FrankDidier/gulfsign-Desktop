@@ -889,10 +889,41 @@ h1{color:#333;font-size:22px}
             client_ssl.settimeout(60)
 
             while True:
+                # 读完整 HTTP 请求 (headers + body). 修复 v3.1.1 之前的 bug:
+                # 单次 recv 只拿到 headers, body 在下一帧时被丢弃 — 直接导致
+                # 抓签约请求时 body_form 为空, 重放时无法替换 person_id.
+                request_data = b""
+                req_hdr_end = -1
+                req_cl = -1
+                req_chunked = False
                 try:
-                    request_data = client_ssl.recv(65536)
+                    while True:
+                        chunk = client_ssl.recv(65536)
+                        if not chunk:
+                            break
+                        request_data += chunk
+
+                        if req_hdr_end < 0 and b"\r\n\r\n" in request_data:
+                            req_hdr_end = request_data.index(b"\r\n\r\n") + 4
+                            hdr_lower = request_data[:req_hdr_end].lower()
+                            m = re.search(rb"content-length:\s*(\d+)", hdr_lower)
+                            if m:
+                                req_cl = int(m.group(1))
+                            req_chunked = b"transfer-encoding: chunked" in hdr_lower
+
+                        if req_hdr_end > 0:
+                            if req_cl >= 0:
+                                if len(request_data) - req_hdr_end >= req_cl:
+                                    break
+                            elif req_chunked:
+                                if b"\r\n0\r\n\r\n" in request_data[-32:]:
+                                    break
+                            else:
+                                # 没 CL, 没 chunked — GET / 无 body 请求, headers 完整即可
+                                break
                 except (socket.timeout, ssl.SSLError, OSError):
-                    break
+                    pass
+
                 if not request_data:
                     break
 
