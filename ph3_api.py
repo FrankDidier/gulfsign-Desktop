@@ -751,11 +751,12 @@ class PH3Client:
                 # `qr_pending=True` 让查询/签约/同步配置接口拒绝调用。
                 self.logged_in = True
                 self.qr_pending = True
-                self.doctor_name = "需要二维码验证"
-                
-                # 提供清晰的错误信息和解决方案
+                # 不再把 doctor_name 设成 "需要二维码验证" — 这只是个临时状态,
+                # 不应污染后续 UI 上显示给用户的医生名字. UI 应通过
+                # qr_pending 标志感知此状态.
+
                 error_msg = f"登录成功但需要二维码验证 (msg={msg_int})"
-                solution = "请使用网页登录功能，在浏览器中完成二维码验证"
+                solution = "应用会自动弹出二维码窗口供扫描 (或使用「打开网页登录」按钮)"
                 
                 # region debug-point qr-required
                 try:
@@ -842,6 +843,144 @@ class PH3Client:
             return False, "连接超时：服务器响应过慢"
         except Exception as e:
             return False, "登录异常：%s" % str(e)
+
+    # ================================================================
+    # 二维码登录 (与原 client.exe getQRCodeImage / finishQRCodeLogin 同接口)
+    # ================================================================
+    #
+    # 网页登录页 (post_login_content.html) 在用户点击 "扫码登录" 后:
+    #   1. POST /ashx/LoginHandler.ashx?ACTION=GENERATE
+    #      响应: {code:0, data:{tokenimage:"data:image/png;base64,...", catoken:"..."}}
+    #      tokenimage 是直接可用于 <img src="..."> 的 data URL.
+    #   2. 每 2 秒轮询 POST /ashx/LoginHandler.ashx?ACTION=QUERY&token=<catoken>
+    #      响应 code 含义:
+    #        0 = 扫码并通过 → 客户端跳转 FormMain.aspx 完成登录
+    #        1 = 已过期/不可用错误 (message 含原因)
+    #        2 = 等待用户扫码 (继续轮询)
+    #        3, 4 = 其它错误 (message 含原因)
+    #
+    # 我们把这两个端点封装成 ``qr_login_generate()`` / ``qr_login_query()``,
+    # 复用 self.session (cookies 已经从前面的密码登录步骤拿到), 因此
+    # 服务端能把扫码结果绑回这个会话.
+
+    def qr_login_generate(self) -> Tuple[bool, str, str, str]:
+        """生成二维码 token + 图像 (data URL).
+
+        Returns: (success, tokenimage_data_url, catoken, error_message)
+        ``tokenimage_data_url`` 形如 ``data:image/png;base64,iVBOR...``,
+        可直接喂给 PIL/tkinter 显示, 也可写到磁盘 PNG.
+        """
+        if not self.session or not self.base_url:
+            return False, "", "", "尚未发起登录会话"
+
+        try:
+            resp = self.session.post(
+                self._url("/ashx/LoginHandler.ashx"),
+                params={"ACTION": "GENERATE"},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                timeout=self._timeout,
+            )
+        except requests.RequestException as e:
+            return False, "", "", "网络请求失败: %s" % e
+
+        if resp.status_code != 200:
+            return False, "", "", "HTTP %d" % resp.status_code
+
+        try:
+            obj = resp.json()
+        except Exception:
+            return False, "", "", "服务器返回非 JSON: %s" % (resp.text or "")[:160]
+
+        if obj.get("code") != 0:
+            return False, "", "", obj.get("message") or "服务端拒绝生成二维码"
+
+        data = obj.get("data") or {}
+        tokenimage = data.get("tokenimage") or ""
+        catoken = data.get("catoken") or ""
+        if not tokenimage or not catoken:
+            return False, "", "", "服务端响应缺少 tokenimage / catoken"
+
+        return True, tokenimage, catoken, ""
+
+    def qr_login_query(self, catoken: str) -> Tuple[int, str]:
+        """轮询一次扫码状态.
+
+        Returns: (code, message)
+          0 = 通过, 应调 ``qr_login_finalize()`` 完成登录.
+          1 = 错误/过期 (message).
+          2 = 等待扫码 (继续轮询).
+          3, 4 = 其它错误.
+          -1 = 网络/解析失败 (调用方可决定继续轮询或终止).
+        """
+        if not self.session or not self.base_url or not catoken:
+            return -1, "尚未生成二维码"
+
+        try:
+            resp = self.session.post(
+                self._url("/ashx/LoginHandler.ashx"),
+                params={"ACTION": "QUERY", "token": catoken},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                timeout=self._timeout,
+            )
+        except requests.RequestException as e:
+            return -1, "网络请求失败: %s" % e
+
+        if resp.status_code != 200:
+            return -1, "HTTP %d" % resp.status_code
+
+        try:
+            obj = resp.json()
+        except Exception:
+            return -1, "服务器返回非 JSON"
+
+        return int(obj.get("code", -1)), obj.get("message") or ""
+
+    def qr_login_finalize(self) -> Tuple[bool, str]:
+        """扫码通过后, 完成登录: 拉 FormMain.aspx → 提取 token / 用户信息 / org_code.
+
+        前提: ``qr_login_query()`` 刚返回 code=0; 此时服务端已把 cookie 升级为
+        2FA 通过状态, 我们只要再拉一次主页就能拿全用户信息.
+
+        Returns: (success, info_message). 成功时 ``self.qr_pending=False``,
+        ``self.logged_in=True``, ``self.org_code`` 等已填充.
+        """
+        if not self.session or not self.base_url:
+            return False, "尚未发起登录会话"
+
+        try:
+            main_resp = self.session.get(
+                self._url("/FormMain.aspx"), timeout=self._timeout
+            )
+        except requests.RequestException as e:
+            return False, "拉取主页失败: %s" % e
+
+        if main_resp.status_code != 200:
+            return False, "拉取主页失败 HTTP %d" % main_resp.status_code
+
+        if not self._extract_tokens(main_resp.text):
+            return False, "扫码完成但未能从主页提取加密 Token"
+
+        # 复用与 login() 相同的用户信息提取逻辑
+        try:
+            self._extract_user_info(main_resp.text)
+        except Exception as e:
+            logger.warning("扫码后提取用户信息失败 (继续): %s", e)
+
+        if not self.org_code:
+            try:
+                orgs = self.get_org_tree("0")
+                if orgs:
+                    self._drill_org_tree(orgs)
+            except Exception as e:
+                logger.warning("扫码后获取机构树失败: %s", e)
+
+        self.logged_in = True
+        self.qr_pending = False
+
+        info = self.doctor_name or "已认证"
+        if self.org_name:
+            info += " (%s)" % self.org_name
+        return True, "扫码登录成功 — %s" % info
 
     # ---- 机构树 ----
 

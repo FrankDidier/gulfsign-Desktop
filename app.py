@@ -37,6 +37,7 @@ from proxy_capture import (
 from license_client import LicenseClient
 from config_manager import ConfigManager
 from batch_processor import BatchProcessor, SuccessLogger, AgeBypassAuditLogger
+from qr_login_dialog import QRLoginDialog
 
 VERSION = "3.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
@@ -796,14 +797,27 @@ class GulfSignApp(tk.Tk):
         self.enhanced_api_password_var = tk.StringVar()
         ttk.Entry(row2, textvariable=self.enhanced_api_password_var, width=25, show="*").pack(side=tk.LEFT)
         
-        # API登录按钮
+        # API登录按钮 + 扫码补登按钮 (并排)
+        api_btn_row = ttk.Frame(api_form_frame)
+        api_btn_row.pack(fill=tk.X)
+
         self.enhanced_api_login_btn = ttk.Button(
-            api_form_frame,
+            api_btn_row,
             text="API直接登录",
             command=self._perform_api_login,
             width=15
         )
-        self.enhanced_api_login_btn.pack()
+        self.enhanced_api_login_btn.pack(side=tk.LEFT)
+
+        # 扫码补登: 适用场景 — API 登录已通过但需 2FA, 用户取消了第一次扫码
+        # 现在想补一次扫码; 也适合 API 登录失效后想重新扫码不再输密码.
+        self.enhanced_qr_login_btn = ttk.Button(
+            api_btn_row,
+            text="📱 扫码补登",
+            command=self._on_manual_qr_login,
+            width=12,
+        )
+        self.enhanced_qr_login_btn.pack(side=tk.LEFT, padx=(8, 0))
     
     def _create_login_status_bar(self, parent):
         """创建登录状态栏"""
@@ -4177,7 +4191,7 @@ class GulfSignApp(tk.Tk):
             return (
                 False,
                 "登录不完整: 需要二维码验证",
-                "请使用 [跳转到3.0系统登录] 在浏览器扫码后回来点 [同步配置]",
+                "点 [📱 扫码补登] 在程序内直接扫码, 或 [跳转到3.0系统登录] 走浏览器",
             )
 
         # 完整登录 (logged_in 且 不是 qr_pending)
@@ -5038,23 +5052,86 @@ class GulfSignApp(tk.Tk):
 
         # success=True 也可能只是 "Token已下发但二维码未扫描"
         if getattr(self.client, "qr_pending", False):
-            self.enhanced_status_var.set("登录不完整: 需要二维码验证")
+            self.enhanced_status_var.set("等待扫码...")
             self.enhanced_sync_btn.configure(state=tk.NORMAL)
-            messagebox.showwarning(
-                "需要二维码验证",
-                f"{message}\n\n"
-                "服务器在 SSO 之外强制要求二维码扫码验证。\n\n"
-                "下一步：\n"
-                "  1. 点击 [跳转到3.0系统登录]，在浏览器中完成扫码\n"
-                "  2. 浏览器登录成功后回到本程序，点击 [同步配置]\n"
-                "  3. 同步成功后再使用 [查询(首页)] / [查询全部]"
-            )
+            # 自动弹出集成 QR 对话框 — 用户不再需要切到浏览器再回来同步.
+            self._launch_integrated_qr_login()
         else:
             self.enhanced_status_var.set("登录成功")
             self.enhanced_sync_btn.configure(state=tk.NORMAL)
             messagebox.showinfo("登录成功", message)
+            self._run_login_diagnosis()
 
-        # 不论是哪一种成功，都重新跑诊断
+    def _on_manual_qr_login(self):
+        """[📱 扫码补登] 按钮处理: 用户主动开启扫码窗口.
+
+        三种触发场景:
+          1. API 登录已通过但 2FA 待扫描, 用户先取消了自动弹出的窗口.
+          2. session 失效, 想用扫码刷新会话避免再输密码.
+          3. 没用过 API 登录, 但已经在网页扫了, 想强制 finalize 一次.
+
+        前提: client.session 已经在前面的 API 登录里创建好了 (cookies 在内).
+        如果没有, 需要用户先点 [API 直接登录] 至少一次.
+        """
+        if not getattr(self.client, "session", None) or not getattr(self.client, "base_url", ""):
+            # 没有 session — 帮用户先做一次 "无密码探测", 拉一遍登录页
+            # 让 cookies 出来, 再让他扫码
+            base_url = self.enhanced_url_var.get().strip()
+            account = (self.enhanced_api_account_var.get().strip()
+                       or self._cfg.get("username", ""))
+            password = (self.enhanced_api_password_var.get().strip()
+                        or self._cfg.get("password", ""))
+            if not (base_url and account and password):
+                messagebox.showinfo(
+                    "提示",
+                    "请先填写账号 / 密码 / 系统地址, 然后:\n"
+                    "  • 点 [API 直接登录] 完成密码这步, 二维码会自动弹出\n"
+                    "  • 或在 [API 直接登录] 之后, 用本按钮再次扫码.",
+                )
+                return
+            # 走一次完整 API 登录, 让 client.session 准备好
+            self._perform_api_login()
+            return
+
+        self._launch_integrated_qr_login()
+
+    def _launch_integrated_qr_login(self):
+        """弹出集成的二维码扫码窗口; 扫码完成后自动 finalize 登录.
+
+        若用户取消 / 选择改用浏览器扫码, 退回提示老路径 (透明降级).
+        """
+        try:
+            dlg = QRLoginDialog(self, self.client)
+            ok, info = dlg.show()
+        except Exception as e:
+            ok, info = False, "QR 弹窗异常: %s" % e
+
+        if ok:
+            # finalize 已经把 logged_in=True, qr_pending=False, org_code 等填好
+            self.enhanced_status_var.set("登录成功 (扫码完成)")
+            try:
+                self._sync_login_configuration()  # 自动 sync 一次 (拉团队/服务包)
+            except Exception:
+                pass
+            messagebox.showinfo("登录成功", info)
+            self._run_login_diagnosis()
+            return
+
+        # 用户取消或改走浏览器路径 — 给老办法的提示, 不再阻断
+        if "网页" in info:
+            messagebox.showinfo(
+                "改用浏览器扫码",
+                "请点击 [跳转到3.0系统登录] 进入网页登录扫码,\n"
+                "完成后回到本程序点击 [同步配置]。",
+            )
+        else:
+            self.enhanced_status_var.set("登录不完整: 需要二维码验证")
+            messagebox.showwarning(
+                "需要二维码验证",
+                "尚未完成扫码。可以:\n"
+                "  • 重新点击 [API 登录] 再次弹出二维码窗口\n"
+                "  • 或点击 [跳转到3.0系统登录] 在浏览器中扫码后回来 [同步配置]",
+            )
         self._run_login_diagnosis()
 
 

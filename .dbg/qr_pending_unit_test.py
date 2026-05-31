@@ -71,7 +71,9 @@ def test_app_check_login_status_qr_pending():
         ok, msg, detail = GulfSignApp._check_login_status(app)
         assert ok is False, f"qr_pending must NOT count as ok; got ok={ok}"
         assert "二维码" in msg, f"message should mention QR; got: {msg}"
-        assert "同步配置" in detail, f"detail should mention 同步配置; got: {detail}"
+        # detail 应给用户可执行的下一步指引 — 任意一种都接受 (扫码补登 or 同步配置)
+        assert ("扫码补登" in detail) or ("同步配置" in detail), \
+            f"detail should mention 扫码补登 or 同步配置; got: {detail}"
         print(f"[ok] qr_pending -> ok={ok}  msg={msg!r}")
 
         # Now flip to fully authenticated
