@@ -43,6 +43,20 @@ TUNNEL_HOSTS = {
     "mp.weixin.qq.com",
 }
 
+# 家医签约抓包: 用户在公卫3.0网页里点 [家医签约] 按钮时, 我们要捕获 POST.
+# 可疑端点 (基于 js_native.pyc 反编译 + 已知接口表):
+#   /Sys_JCWS/B0105/Do_B0105_Handler.ashx  ← 居民档案签约相关
+#   /Sys_JCWS/B0107/Do_B0107_Handler.ashx  ← 团队/医生签约管理
+#   /Sys_JCWS/B0103/Do_B0103_Handler.ashx  ← 家庭档案/成员
+#   /Sys_JCWS/JKDA/Do_Query_Handler.ashx   ← 健康档案查询 (排除, 这是 read-only)
+#
+# 我们捕获 ggws.hnhfpc.gov.cn 上对前三个 Handler 的 POST. JKDA 是查询不抓.
+SIGN_CAPTURE_PATH_PATTERNS = (
+    re.compile(rb"/Sys_JCWS/B0105/Do_B0105_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/Sys_JCWS/B0107/Do_B0107_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/Sys_JCWS/B0103/Do_B0103_Handler\.ashx", re.IGNORECASE),
+)
+
 OPENID_PATTERN = re.compile(
     rb'[?&](?:[Oo]penid|openId|OPENID)=([a-zA-Z0-9_-]{20,})', re.IGNORECASE
 )
@@ -402,7 +416,12 @@ class CertManager:
 
 
 class OpenIDProxy:
-    """MITM proxy that captures OpenID from health card traffic."""
+    """MITM proxy that captures OpenID from health card traffic.
+
+    Optional 二次身份: 通过传入 ``on_sign_captured`` 回调激活 "家医签约抓包"
+    模式 — 当 MITM 看到 ggws.hnhfpc.gov.cn 上对 B0105/B0107/B0103 Handler 的
+    POST 请求时, 把完整的 (URL, headers, body) 序列化成 JSON 落盘并回调.
+    """
 
     def __init__(
         self,
@@ -410,22 +429,31 @@ class OpenIDProxy:
         on_openid: Optional[Callable] = None,
         on_log: Optional[Callable] = None,
         on_wechatcode: Optional[Callable] = None,
+        on_sign_captured: Optional[Callable] = None,
+        sign_capture_dir: Optional[str] = None,
     ):
         self.port = port
         self.on_openid = on_openid
         self.on_log = on_log
         self.on_wechatcode = on_wechatcode
+        # 家医签约抓包回调 — 接收 dict: {timestamp, host, method, path, query,
+        # action, headers, body_text, body_form, raw_request}
+        self.on_sign_captured = on_sign_captured
         self._running = False
         self._server_socket = None
         self._thread = None
         self._found_openids: Set[str] = set()
         self._found_wechatcodes: Set[str] = set()
+        self._sign_captures: list = []
         self._traffic_log_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         cert_dir = os.path.join(base_dir, "certs")
         self.cert_mgr = CertManager(cert_dir)
         self.traffic_log_path = os.path.join(base_dir, "traffic_log.txt")
+        self.sign_capture_dir = sign_capture_dir or os.path.join(
+            base_dir, ".dbg", "sign_captures"
+        )
 
     @property
     def ca_cert_path(self):
@@ -460,6 +488,122 @@ class OpenIDProxy:
                     f.write(text + "\n")
         except Exception:
             pass
+
+        # 家医签约抓包: 仅在 REQUEST 方向, 仅对 ggws 域名, 仅 POST.
+        if direction == ">>> REQUEST" and "ggws" in (hostname or "").lower():
+            try:
+                self._maybe_capture_sign_request(hostname, data)
+            except Exception as e:
+                logger.debug("sign capture skip: %s", e)
+
+    def _maybe_capture_sign_request(self, hostname: str, data: bytes):
+        """检测是否为 [家医签约] / [即时签约] / [批量签约] 等 POST,
+        命中则解析 → JSON 落盘 → 回调."""
+        if not data:
+            return
+        # 必须 POST (GET 是查询/页面加载, 跳过)
+        if not data.startswith(b"POST "):
+            return
+
+        # 拆 request line / headers / body
+        head_end = data.find(b"\r\n\r\n")
+        if head_end < 0:
+            return
+        head_part = data[:head_end].decode("utf-8", errors="replace")
+        body_bytes = data[head_end + 4:]
+
+        lines = head_part.split("\r\n")
+        if not lines:
+            return
+        # 第一行: "POST /path?query HTTP/1.1"
+        try:
+            _method, path_full, _ver = lines[0].split(" ", 2)
+        except ValueError:
+            return
+
+        # 命中签约相关 Handler?
+        path_bytes = path_full.encode("utf-8", errors="replace")
+        if not any(p.search(path_bytes) for p in SIGN_CAPTURE_PATH_PATTERNS):
+            return
+
+        # 解析 headers
+        headers: dict = {}
+        for ln in lines[1:]:
+            if ":" in ln:
+                k, _, v = ln.partition(":")
+                headers[k.strip()] = v.strip()
+
+        # 拆 path / query
+        from urllib.parse import urlparse, parse_qsl
+        u = urlparse("http://x" + path_full)  # urlparse 需要 scheme
+        path_only = u.path
+        query_pairs = parse_qsl(u.query, keep_blank_values=True)
+        query_dict = dict(query_pairs)
+        action = (
+            query_dict.get("ACTION") or query_dict.get("action") or ""
+        )
+
+        # 解析 body — 尝试 form-encoded; 失败则保留 raw
+        body_text = body_bytes.decode("utf-8", errors="replace")
+        body_form: dict = {}
+        ct = headers.get("Content-Type", "").lower()
+        if "application/x-www-form-urlencoded" in ct or (
+            body_text and "=" in body_text and "<" not in body_text[:32]
+        ):
+            try:
+                body_form = dict(parse_qsl(body_text, keep_blank_values=True))
+            except Exception:
+                body_form = {}
+
+        import datetime
+        import json
+        ts = datetime.datetime.now()
+        record = {
+            "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "host": hostname,
+            "method": "POST",
+            "path": path_only,
+            "query": query_dict,
+            "action": action,
+            "headers": headers,
+            "body_text": body_text[:8000],
+            "body_form": body_form,
+            # raw_request 截 8KB 防止巨大 body 撑爆 JSON
+            "raw_request": data[:8000].decode("utf-8", errors="replace"),
+        }
+
+        self._sign_captures.append(record)
+
+        # 落盘到 sign_captures/sign_<ts>_<action>.json
+        try:
+            os.makedirs(self.sign_capture_dir, exist_ok=True)
+            fn = "sign_%s_%s.json" % (
+                ts.strftime("%Y%m%d_%H%M%S_%f")[:-3],
+                (action or "noaction").replace("/", "_"),
+            )
+            fp = os.path.join(self.sign_capture_dir, fn)
+            with open(fp, "w", encoding="utf-8") as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+            record["_saved_to"] = fp
+            self._log(
+                "📡 已捕获签约请求: %s ACTION=%s → %s" % (
+                    path_only, action or "?", os.path.basename(fp),
+                ),
+                "ok",
+            )
+        except Exception as e:
+            self._log("签约请求保存失败: %s" % e, "warn")
+
+        if self.on_sign_captured:
+            try:
+                self.on_sign_captured(record)
+            except Exception:
+                pass
+
+    @property
+    def sign_captures(self) -> list:
+        """返回当前会话内已捕获的签约请求记录列表 (副本)."""
+        return list(self._sign_captures)
 
     def start(self) -> bool:
         if self._running:

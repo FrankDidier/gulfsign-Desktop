@@ -555,6 +555,8 @@ class GulfSignApp(tk.Tk):
         self._cap_proxy: Optional[OpenIDProxy] = None
         self._cap_running = False
         self._cap_request_count = 0
+        # 抓到的家医签约 POST 模板列表 (saved JSON paths, 最新在前)
+        self._sign_capture_records: list = []
 
         self.capability_profile = {
             "mode": "unknown",
@@ -1057,6 +1059,27 @@ class GulfSignApp(tk.Tk):
             r2, text="删除居民申请", variable=self.var_del_resident,
         ).pack(side=tk.LEFT, padx=(0, 12))
 
+        # 直签模板 — 高级 (默认 OFF)
+        r2b = ttk.Frame(frame)
+        r2b.pack(fill=tk.X, pady=(4, 0))
+
+        self.var_use_direct_sign = tk.BooleanVar(
+            value=bool(self._cfg.get("use_direct_sign", False))
+        )
+        ttk.Checkbutton(
+            r2b,
+            text="★ 使用直签模板 (高级 — 重放抓到的家医签约 POST)",
+            variable=self.var_use_direct_sign,
+            command=self._on_toggle_direct_sign,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_direct_sign_status = tk.StringVar(value="未设置模板")
+        ttk.Label(
+            r2b, textvariable=self.var_direct_sign_status,
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+        self.after(80, self._refresh_direct_sign_status)
+
         r3 = ttk.Frame(frame)
         r3.pack(fill=tk.X, pady=(4, 0))
 
@@ -1469,6 +1492,49 @@ class GulfSignApp(tk.Tk):
             text="(对所选居民只读探测; 已实名/已面访者通常会被服务端拒绝修改)",
             foreground="gray",
         ).pack(side=tk.LEFT, padx=(8, 0))
+
+    def _on_toggle_direct_sign(self):
+        """3.0签约页: 切换「使用直签模板」时刷新状态条."""
+        self._refresh_direct_sign_status()
+        on = bool(self.var_use_direct_sign.get())
+        self._cfg["use_direct_sign"] = on
+        try:
+            save_config(self._cfg)
+        except Exception:
+            pass
+        if on:
+            tpl = self._load_direct_sign_template()
+            if tpl is None:
+                self._log(
+                    "⚠ 已勾选「使用直签模板」, 但未在 [流量抓包] 标签里设置模板. "
+                    "请先抓包并选定一个模板.", "warn",
+                )
+            else:
+                self._log(
+                    "★ 直签模板已就绪: ACTION=%s, 替换字段=%s" % (
+                        tpl.action or "?",
+                        ", ".join(tpl.likely_personid_fields()) or "(无)",
+                    ), "info",
+                )
+
+    def _refresh_direct_sign_status(self):
+        """更新 r2b 上「未设置模板/已加载」状态条."""
+        if not getattr(self, "var_direct_sign_status", None):
+            return
+        path = (self._cfg or {}).get("direct_sign_template_path", "")
+        if not path or not os.path.exists(path):
+            self.var_direct_sign_status.set("未设置模板 (去[流量抓包]标签抓取)")
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(path)
+            self.var_direct_sign_status.set(
+                "已加载: %s (ACTION=%s, %d 字段)" % (
+                    os.path.basename(path), tpl.action or "?", len(tpl.body_form),
+                )
+            )
+        except Exception as e:
+            self.var_direct_sign_status.set("模板加载失败: %s" % e)
 
     def _on_hc_age_bypass_toggle(self):
         """同步年龄绕行复选框状态到配置 + 警告."""
@@ -1933,6 +1999,7 @@ class GulfSignApp(tk.Tk):
         self._build_capture_guide(parent)
         self._build_capture_controls(parent)
         self._build_capture_stats(parent)
+        self._build_sign_captures_panel(parent)
         self._build_capture_log(parent)
 
     def _build_capture_guide(self, parent):
@@ -1940,18 +2007,20 @@ class GulfSignApp(tk.Tk):
         frame.pack(fill=tk.X, pady=(0, 4))
 
         guide_text = (
-            "流量抓包功能用于记录微信小程序与服务器之间的完整通信数据，\n"
-            "便于分析绑卡、解绑、人脸验证等关键接口的调用流程。\n"
+            "流量抓包: 抓两类有用的请求 — (A) 健康卡 OpenID, (B) 公卫3.0「家医签约」POST.\n"
             "\n"
-            "说明：日志里的「已记录」表示请求已被解密并写入日志，代理会照常转发，\n"
-            "不会故意阻断小程序；若页面一直转圈，再检查证书是否信任、是否已重启微信。\n"
+            "【家医签约抓包 — 用于直签】\n"
+            "  ① 点击「开始抓包」→ 自动安装证书 + 设置系统代理\n"
+            "  ② 浏览器打开 https://ggws.hnhfpc.gov.cn → 用账号密码登录\n"
+            "  ③ 找一位居民, 点击官方界面上的 [家医签约] 按钮 (走完弹窗确认)\n"
+            "  ④ 抓包器自动捕获该 POST → 落到 .dbg/sign_captures/sign_*.json\n"
+            "  ⑤ 在下面「已抓签约请求」里能看到, 点「设为直签模板」即可\n"
+            "  ⑥ 之后的批量签约可在 [3.0系统签约] 标签里勾选「使用直签模板」\n"
             "\n"
-            "操作步骤：\n"
-            "  ① 点击「开始抓包」→ 系统自动设置代理和证书\n"
-            "  ② 打开电脑版微信，进入目标小程序（如\"湖南省居民健康卡\"、\"我的健康卡\"等）\n"
-            "  ③ 在小程序中执行需要分析的操作（绑卡、解绑、查看家庭医生等）\n"
-            "  ④ 操作完成后点击「停止抓包」→ 点击「导出日志」保存文件\n"
-            "  ⑤ 将导出的日志文件发送给技术人员进行分析"
+            "【日志导出】\n"
+            "  「停止抓包」→「导出日志」可保存完整 traffic_log.txt (含所有解密请求)\n"
+            "\n"
+            "提示: 公卫3.0 服务器有速率/CSRF 校验, 直签时建议保持 0.3-1 秒间隔."
         )
 
         try:
@@ -2002,6 +2071,76 @@ class GulfSignApp(tk.Tk):
         ttk.Label(frame, textvariable=self.var_cap_stats, font=("", 10)).pack(
             side=tk.LEFT,
         )
+
+        ttk.Label(
+            frame, text="  |  ", foreground="gray",
+        ).pack(side=tk.LEFT)
+
+        self.var_sign_capture_count = tk.StringVar(value="家医签约模板: 0")
+        ttk.Label(
+            frame, textvariable=self.var_sign_capture_count,
+            font=("", 10, "bold"), foreground="#16a34a",
+        ).pack(side=tk.LEFT)
+
+    def _build_sign_captures_panel(self, parent):
+        """已抓签约请求面板 — 列出捕获的家医签约 POST 模板, 可设为直签模板."""
+        frame = ttk.LabelFrame(
+            parent, text=" 已抓签约请求 (家医签约 POST) ", padding=6,
+        )
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        cols = ("time", "action", "fields", "cid", "file")
+        self.sign_capture_tree = ttk.Treeview(
+            frame, columns=cols, show="headings", height=4, selectmode="browse",
+        )
+        self.sign_capture_tree.heading("time", text="抓取时间")
+        self.sign_capture_tree.heading("action", text="ACTION")
+        self.sign_capture_tree.heading("fields", text="字段数")
+        self.sign_capture_tree.heading("cid", text="居民ID (前4位)")
+        self.sign_capture_tree.heading("file", text="文件名")
+        self.sign_capture_tree.column("time", width=140, anchor="w")
+        self.sign_capture_tree.column("action", width=80, anchor="center")
+        self.sign_capture_tree.column("fields", width=60, anchor="center")
+        self.sign_capture_tree.column("cid", width=110, anchor="center")
+        self.sign_capture_tree.column("file", width=240, anchor="w")
+        self.sign_capture_tree.pack(fill=tk.X, side=tk.LEFT, expand=True)
+
+        sb = ttk.Scrollbar(
+            frame, orient=tk.VERTICAL, command=self.sign_capture_tree.yview,
+        )
+        self.sign_capture_tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_row = ttk.Frame(parent)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(
+            btn_row, text="刷新模板列表",
+            command=self._refresh_sign_captures,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="查看模板详情",
+            command=self._on_view_sign_capture,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="★ 设为直签模板 (供3.0签约页使用)",
+            command=self._on_use_sign_capture,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="打开抓包目录",
+            command=self._open_sign_capture_dir,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="删除选中",
+            command=self._on_delete_sign_capture,
+        ).pack(side=tk.LEFT)
+
+        # 启动时刷新一下 — 用户可能保留了上次会话的模板
+        self.after(100, self._refresh_sign_captures)
 
     def _build_capture_log(self, parent):
         frame = ttk.LabelFrame(parent, text=" 实时抓包日志 ", padding=4)
@@ -2088,10 +2227,14 @@ class GulfSignApp(tk.Tk):
             else:
                 self._cap_log(msg, tag)
 
+        def on_sign_captured(record):
+            self.after(0, lambda r=record: self._on_sign_request_captured(r))
+
         self._cap_proxy = OpenIDProxy(
             port=8888,
             on_openid=on_openid,
             on_log=on_log,
+            on_sign_captured=on_sign_captured,
         )
 
         if self._cap_proxy.start():
@@ -2173,6 +2316,200 @@ class GulfSignApp(tk.Tk):
         except Exception as e:
             self._cap_log("导出失败: %s" % e, "err")
             messagebox.showerror("导出失败", str(e))
+
+    # -- Tab 4: Sign Capture (家医签约 抓包) --
+
+    def _refresh_sign_captures(self):
+        """重新扫描 .dbg/sign_captures/ 并刷新表格."""
+        from direct_sign import list_captures, SignTemplate, DEFAULT_CAPTURE_DIR
+
+        files = list_captures(DEFAULT_CAPTURE_DIR)
+
+        for iid in self.sign_capture_tree.get_children():
+            self.sign_capture_tree.delete(iid)
+
+        self._sign_capture_records = files
+
+        for fp in files:
+            try:
+                tpl = SignTemplate.from_capture(fp)
+            except Exception as e:
+                print("[sign-cap] skip bad capture %s: %s" % (fp, e))
+                continue
+            cid_short = (tpl.captured_person_id[:4] + "***") if tpl.captured_person_id else "—"
+            self.sign_capture_tree.insert(
+                "", tk.END, iid=fp,
+                values=(
+                    tpl.captured_at or "?",
+                    tpl.action or "?",
+                    str(len(tpl.body_form)),
+                    cid_short,
+                    os.path.basename(fp),
+                ),
+            )
+
+        self.var_sign_capture_count.set("家医签约模板: %d" % len(files))
+
+    def _on_sign_request_captured(self, record: dict):
+        """OpenIDProxy 在 main thread 里回调进来. 刷新列表 + 提示用户."""
+        path = record.get("_saved_to", "")
+        action = record.get("action", "?")
+        host = record.get("host", "?")
+        url_path = record.get("path", "?")
+        self._cap_log(
+            "📡 已捕获家医签约请求: %s%s (ACTION=%s)" % (host, url_path, action),
+            "ok",
+        )
+        self._cap_log(
+            "    文件: %s — 切到「已抓签约请求」面板, 点「设为直签模板」即可" %
+            (os.path.basename(path) if path else "?"),
+            "info",
+        )
+        self._refresh_sign_captures()
+
+    def _selected_sign_capture(self) -> Optional[str]:
+        sel = self.sign_capture_tree.selection()
+        if not sel:
+            messagebox.showinfo(
+                "提示", "请先在「已抓签约请求」表里选中一条记录"
+            )
+            return None
+        return sel[0]
+
+    def _on_view_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(fp)
+        except Exception as e:
+            messagebox.showerror("打开失败", "无法读取模板:\n%s" % e)
+            return
+
+        win = tk.Toplevel(self)
+        win.title("签约请求模板详情 — %s" % os.path.basename(fp))
+        win.geometry("780x520")
+
+        info = (
+            "Host: %s\n" % tpl.host +
+            "Path: %s\n" % tpl.path +
+            "ACTION: %s\n" % (tpl.action or "?") +
+            "抓取时间: %s\n" % (tpl.captured_at or "?") +
+            "字段总数: %d\n" % len(tpl.body_form) +
+            "识别到的居民ID字段: %s\n" % (
+                ", ".join(tpl.likely_personid_fields()) or "(无, 重放将不可用)"
+            ) +
+            "识别到的姓名字段: %s\n" % (
+                ", ".join(tpl.likely_name_fields()) or "(无)"
+            ) +
+            "captured_person_id: %s\n" % (tpl.captured_person_id or "—") +
+            "captured_name: %s\n" % (tpl.captured_name or "—") +
+            "\n--- body_form (replay 时按值替换 person_id) ---\n"
+        )
+        for k, v in tpl.body_form.items():
+            v_short = v if len(v) <= 80 else v[:77] + "..."
+            info += "  %-24s = %s\n" % (k, v_short)
+
+        info += (
+            "\n--- query ---\n" +
+            "\n".join("  %s = %s" % (k, v) for k, v in tpl.query.items())
+        )
+
+        txt = tk.Text(win, wrap=tk.NONE, font=("Menlo", 10))
+        sb_y = ttk.Scrollbar(win, orient=tk.VERTICAL, command=txt.yview)
+        sb_x = ttk.Scrollbar(win, orient=tk.HORIZONTAL, command=txt.xview)
+        txt.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side=tk.RIGHT, fill=tk.Y)
+        sb_x.pack(side=tk.BOTTOM, fill=tk.X)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.insert("1.0", info)
+        txt.configure(state=tk.DISABLED)
+
+    def _on_use_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(fp)
+        except Exception as e:
+            messagebox.showerror("加载失败", "模板读取错误:\n%s" % e)
+            return
+
+        if not tpl.captured_person_id:
+            messagebox.showwarning(
+                "模板不可用",
+                "该模板里没识别出居民身份证或 GUID 字段, 重放时不知道替换哪个字段.\n"
+                "请重新抓一次明确包含 18 位身份证或 36 位 GUID 的请求.",
+            )
+            return
+
+        if not tpl.likely_personid_fields():
+            messagebox.showwarning(
+                "模板不可用", "未发现可替换的 person_id 字段."
+            )
+            return
+
+        self._active_sign_template_path = fp
+        # 把模板路径写进 config 让3.0签约页能读到
+        self._cfg["direct_sign_template_path"] = fp
+        try:
+            save_config(self._cfg)
+        except Exception as e:
+            print("[sign-cap] save direct_sign template path failed: %s" % e)
+
+        self._cap_log(
+            "★ 直签模板已设置: %s (ACTION=%s, person_id字段: %s)" % (
+                os.path.basename(fp), tpl.action or "?",
+                ", ".join(tpl.likely_personid_fields()),
+            ),
+            "ok",
+        )
+        # 同步刷新3.0签约页的状态条
+        try:
+            self._refresh_direct_sign_status()
+        except Exception:
+            pass
+        messagebox.showinfo(
+            "已设置直签模板",
+            "模板: %s\nACTION: %s\n字段数: %d\n替换字段: %s\n\n"
+            "下一步: 切到「3.0系统签约」标签, 勾选「使用直签模板」即可在批量\n"
+            "签约时使用该 POST 直接重放, 越过 STATUS=5/6 中间态." % (
+                os.path.basename(fp),
+                tpl.action or "?",
+                len(tpl.body_form),
+                ", ".join(tpl.likely_personid_fields()),
+            ),
+        )
+
+    def _open_sign_capture_dir(self):
+        from direct_sign import DEFAULT_CAPTURE_DIR
+        os.makedirs(DEFAULT_CAPTURE_DIR, exist_ok=True)
+        try:
+            if sys.platform == "darwin":
+                os.system("open '%s'" % DEFAULT_CAPTURE_DIR)
+            elif sys.platform == "win32":
+                os.startfile(DEFAULT_CAPTURE_DIR)  # type: ignore[attr-defined]
+            else:
+                os.system("xdg-open '%s'" % DEFAULT_CAPTURE_DIR)
+        except Exception as e:
+            messagebox.showerror("打开失败", str(e))
+
+    def _on_delete_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        if not messagebox.askyesno(
+            "确认删除", "删除模板文件:\n%s" % os.path.basename(fp),
+        ):
+            return
+        try:
+            os.remove(fp)
+            self._cap_log("已删除: %s" % os.path.basename(fp), "info")
+            self._refresh_sign_captures()
+        except Exception as e:
+            messagebox.showerror("删除失败", str(e))
 
     # ================================================================
     # Tab 5: License Configuration
@@ -3372,6 +3709,23 @@ class GulfSignApp(tk.Tk):
 
     def _batch_sign_worker(self, targets, delay, doctor, team, sign_opts=None):
         opts = sign_opts or {}
+
+        # 直签模板模式: 若用户已通过抓包设置了模板, 优先用它替换 sign_one
+        # — 这是为了复刻其它团队工具看到的 "STATUS=0 直接签约" 行为.
+        direct_template = None
+        if self._direct_sign_enabled():
+            direct_template = self._load_direct_sign_template()
+            if direct_template:
+                self.after(0, lambda t=direct_template: self._log(
+                    "★ 直签模式启用: 模板=%s, ACTION=%s" % (
+                        os.path.basename(t.source_file or ""), t.action or "?",
+                    ), "info",
+                ))
+            else:
+                self.after(0, lambda: self._log(
+                    "⚠ 已勾选「使用直签模板」但未找到模板, 退回普通签约模式", "warn",
+                ))
+
         for i, patient in enumerate(targets):
             if self._stop_event.is_set():
                 self.after(0, lambda: self._log("已手动停止", "warn"))
@@ -3391,21 +3745,39 @@ class GulfSignApp(tk.Tk):
                 ),
             )
 
-            result = self.client.sign_one(
-                person_id=patient.person_id,
-                name=patient.name,
-                team_name=team,
-                doctor_name=doctor,
-                delay=delay,
-                contract_status=patient.contract_status,
-                contract_code=patient.contract_code,
-                auto_void=opts.get("auto_void", False),
-                auto_delete_doctor=opts.get("del_doctor", False),
-                auto_delete_resident=opts.get("del_resident", False),
-                service_type=opts.get("pop_code", "0"),
-                agreement_start=opts.get("agree_start", ""),
-                agreement_end=opts.get("agree_end", ""),
-            )
+            if direct_template is not None:
+                ds_res = direct_template.replay_for(
+                    self.client,
+                    person_id=patient.person_id,
+                    name=patient.name,
+                )
+                # 转换 DirectSignResult → SignResult 兼容上游 _on_sign_result
+                from ph3_api import SignResult as _SR
+                result = _SR(
+                    success=ds_res.success,
+                    person_id=ds_res.person_id,
+                    name=ds_res.name,
+                    contract_code=ds_res.contract_code,
+                    error=ds_res.error,
+                    step="initiate" if ds_res.success else "initiate",
+                    elapsed=ds_res.elapsed,
+                )
+            else:
+                result = self.client.sign_one(
+                    person_id=patient.person_id,
+                    name=patient.name,
+                    team_name=team,
+                    doctor_name=doctor,
+                    delay=delay,
+                    contract_status=patient.contract_status,
+                    contract_code=patient.contract_code,
+                    auto_void=opts.get("auto_void", False),
+                    auto_delete_doctor=opts.get("del_doctor", False),
+                    auto_delete_resident=opts.get("del_resident", False),
+                    service_type=opts.get("pop_code", "0"),
+                    agreement_start=opts.get("agree_start", ""),
+                    agreement_end=opts.get("agree_end", ""),
+                )
 
             self.after(0, lambda r=result, idx=i: self._on_sign_result(r, idx))
 
@@ -3413,6 +3785,24 @@ class GulfSignApp(tk.Tk):
                 time.sleep(delay)
 
         self.after(0, self._signing_finished)
+
+    def _direct_sign_enabled(self) -> bool:
+        """当前是否启用直签模式 (UI 复选框 + 已设置模板路径)."""
+        if not getattr(self, "var_use_direct_sign", None):
+            return False
+        return bool(self.var_use_direct_sign.get())
+
+    def _load_direct_sign_template(self):
+        """从 config 读取 direct_sign_template_path 并加载, 失败返回 None."""
+        path = (self._cfg or {}).get("direct_sign_template_path", "")
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            from direct_sign import SignTemplate
+            return SignTemplate.from_capture(path)
+        except Exception as e:
+            print("[direct-sign] load template failed: %s" % e)
+            return None
 
     def _on_sign_result(self, result: SignResult, index: int):
         done = index + 1

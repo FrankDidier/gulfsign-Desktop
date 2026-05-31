@@ -20,6 +20,23 @@
 - 报告 honest semantics: `confirm` 失败时不再静默标记为 `step="initiate"`
   / `success=True`; 家庭批量在创建结果与请求人数不一致时报失败/部分失败.
 
+### 1.1 直签模板 (NEW, REAL — 用于复刻其它团队工具的 STATUS=0 直接签约)
+
+`proxy_capture.OpenIDProxy` + `direct_sign.SignTemplate`:
+- 浏览器登录公卫3.0 → 点 [家医签约] → MITM 自动捕获该 POST 落到
+  `.dbg/sign_captures/sign_<ts>_<action>.json` (含 path/query/headers/body_form).
+- [流量抓包] 标签新增 "已抓签约请求" 面板, "查看模板详情" + "★ 设为直签模板".
+- [3.0系统签约] 标签新增 ☐ 使用直签模板 复选框 — 勾选后 `_batch_sign_worker`
+  改走 `SignTemplate.replay_for(client, person_id, name)` 替代 `client.sign_one`.
+- 替换策略: 按 *值* 替换 — 模板里凡是出现原始 person_id 的字段 (识别
+  18 位身份证 + 32-36 位 GUID), 重放时统一替换成新居民的 person_id.
+  Cookie/CSRF 等会过期的头被自动剥离, 让 `client.session` 用 fresh cookies.
+- 失败诚实: opType≠0 / 非 JSON / HTTP≠200 / 网络异常 一律 `success=False`,
+  与 `SignResult` 兼容, 上游 `_on_sign_result` 直接消费.
+- 单测 31 条 (`.dbg/direct_sign_unit_test.py`) 覆盖: 字段抽取, 替换正确性,
+  前置校验 (logged_in/qr_pending/org_code/person_id/captured_person_id),
+  HTTP 错误, 非 JSON 解析, Cookie 头剥离, 批量 replay.
+
 > **批量并发**: `BatchProcessor (workers=20, batch=2)` 是早期 client.exe
 > 的兼容实现, 当前 UI 实际使用顺序循环 + delay (`_batch_sign_worker`),
 > 与原 client.exe 行为一致 (用户可控制延迟). 20 worker pool 在
