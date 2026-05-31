@@ -301,8 +301,19 @@ class SignTemplate:
         text = (resp.text or "").strip()
 
         # --- 解析响应 ---
+        # 防御要点 (silent-failure 加固):
+        # 1) 响应必须是 JSON object (不是 array / 不是 scalar) — 不然算非 JSON.
+        # 2) opType 必须能转 int 且 == 0 — 不然算失败.
+        # 3) 非 JSON 路径里只在 *没有错误关键字* 时才认 contract_code regex,
+        #    否则一律算失败 — 防止 "系统繁忙: contract_code='<guid>'" 这种
+        #    错误页被误判为成功.
+        obj = None
         try:
             obj = json.loads(text)
+        except (ValueError, TypeError):
+            obj = None
+
+        if isinstance(obj, dict):
             op = obj.get("opType")
             try:
                 op_int = int(op) if op is not None else None
@@ -335,8 +346,18 @@ class SignTemplate:
                 op_type=op_int,
                 template_action=self.action,
             )
-        except (ValueError, TypeError):
-            # 非 JSON 响应 — 公卫 3.0 偶尔返回 HTML 错误页; 启发式判断
+
+        # 非 dict 响应 (JSON array, JSON scalar, 或非 JSON 文本)
+        # → 走非 JSON 启发式. 但只有在响应文本里 *没有* 任何错误关键字时
+        # 才接受 contract_code regex 兜底 — 否则错误页里偶含 GUID 也会被骗.
+        ERROR_KEYWORDS = (
+            "错误", "失败", "异常", "繁忙", "拒绝",
+            "未登录", "请先登录", "session", "Session",
+            "<script", "<html", "redirect", "login.aspx", "Login.aspx",
+        )
+        has_error_signal = any(kw in text for kw in ERROR_KEYWORDS)
+
+        if not has_error_signal:
             cc_m = re.search(
                 r'[Cc]ontract.?[Cc]ode["\s]*[=:]["\s]*([a-f0-9-]{36})',
                 text, re.IGNORECASE,
@@ -350,14 +371,22 @@ class SignTemplate:
                     raw_response=text[:1000],
                     template_action=self.action,
                 )
-            return DirectSignResult(
-                False, person_id, name,
-                error="非 JSON 响应 (前 120 字符: %s...)" % text[:120],
-                step="direct_sign",
-                elapsed=elapsed,
-                raw_response=text[:1000],
-                template_action=self.action,
-            )
+
+        # 兜底失败 (有错误关键字 OR 没找到 contract_code)
+        if isinstance(obj, list):
+            err = "服务器返回 JSON 数组 (非预期 dict 格式)"
+        elif obj is None:
+            err = "非 JSON 响应 (前 120 字符: %s...)" % text[:120]
+        else:
+            err = "JSON 响应非 dict 类型: %r" % type(obj).__name__
+        return DirectSignResult(
+            False, person_id, name,
+            error=err,
+            step="direct_sign",
+            elapsed=elapsed,
+            raw_response=text[:1000],
+            template_action=self.action,
+        )
 
 
 # =====================================================================

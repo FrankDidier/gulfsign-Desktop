@@ -231,19 +231,42 @@ class TestReplayFor(unittest.TestCase):
         self.assertFalse(r.success)
         self.assertIn("HTTP 500", r.error)
 
-    def test_failure_non_json_response_extracts_contract(self):
+    def test_non_json_with_contract_code_clean_text_succeeds(self):
+        """Non-JSON 响应里若有 contract_code GUID 且 *无错误关键字*, 才算成功.
+        这模拟某些 ASP.NET handler 返回纯 JS 片段的边缘情况."""
         c = self._mk_client(
-            response_text='<html>contract_code = "abc12345-6789-4def-9012-3456789abcde"</html>',
+            response_text='var c=1;contract_code = "abc12345-6789-4def-9012-3456789abcde"',
         )
         r = self.tpl.replay_for(c, "431122199009098765")
         self.assertTrue(r.success)
         self.assertEqual(r.contract_code, "abc12345-6789-4def-9012-3456789abcde")
 
+    def test_html_with_contract_code_is_rejected(self):
+        """HTML 错误页里偶含 contract_code GUID 字串 — 必须拒绝, 不许误判.
+        (回归测试: silent_failure_probe 发现的真实 risk)"""
+        c = self._mk_client(
+            response_text='<html>系统繁忙: contract_code = "abc12345-6789-4def-9012-3456789abcde"</html>',
+        )
+        r = self.tpl.replay_for(c, "431122199009098765")
+        self.assertFalse(r.success)
+
     def test_failure_non_json_no_contract(self):
         c = self._mk_client(response_text="<html>error page</html>")
         r = self.tpl.replay_for(c, "431122199009098765")
         self.assertFalse(r.success)
-        self.assertIn("非 JSON", r.error)
+
+    def test_json_array_response_does_not_crash(self):
+        """回归测试: silent_failure_probe 发现的 AttributeError silent crash."""
+        c = self._mk_client(response_text='[{"opType":0,"type":"X"}]')
+        r = self.tpl.replay_for(c, "431122199009098765")
+        self.assertFalse(r.success)
+        self.assertIn("数组", r.error)
+
+    def test_json_scalar_response_does_not_crash(self):
+        """同上, JSON 标量也别崩."""
+        c = self._mk_client(response_text='42')
+        r = self.tpl.replay_for(c, "431122199009098765")
+        self.assertFalse(r.success)
 
     def test_network_exception_handled(self):
         c = self._mk_client()
