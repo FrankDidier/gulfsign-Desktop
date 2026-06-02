@@ -126,10 +126,16 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
+            if not isinstance(data, dict):
+                return False, "获取Token失败: 响应格式异常"
             if data.get("errno") != 0:
                 return False, "获取Token失败: %s" % data.get("message", "未知错误")
 
-            self.jwt_token = data["data"]["token"]
+            inner = data.get("data")
+            token = inner.get("token") if isinstance(inner, dict) else None
+            if not token:
+                return False, "获取Token失败: 响应缺少 token 字段"
+            self.jwt_token = token
             self.connected = True
 
             try:
@@ -164,12 +170,22 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
-            if data.get("errno") != 0:
-                logger.warning("获取卡列表失败: %s", data.get("message"))
+            if not isinstance(data, dict) or data.get("errno") != 0:
+                logger.warning(
+                    "获取卡列表失败: %s",
+                    data.get("message") if isinstance(data, dict) else "响应格式异常",
+                )
+                return []
+
+            raw_items = data.get("data", [])
+            if not isinstance(raw_items, list):
+                logger.warning("获取卡列表: data 字段非列表, 返回空")
                 return []
 
             cards = []
-            for item in data.get("data", []):
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
                 cards.append(HealthCard(
                     health_card_id=item.get("healthCardId", ""),
                     name=item.get("name", ""),
@@ -202,10 +218,17 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
+            if not isinstance(data, dict):
+                return False, "更新RPC失败: 响应格式异常"
             msg = data.get("message", "")
-            if "已完成" in msg:
+            errno = data.get("errno")
+            # 成功判定优先用平台统一的 errno==0; 仅当响应没有 errno 字段时,
+            # 才回退到 message 含"已完成"(防止把含 errno!=0 的错误响应误报成功).
+            if errno == 0:
+                return True, msg or "已完成"
+            if errno is None and "已完成" in msg:
                 return True, msg
-            return False, msg
+            return False, msg or "更新RPC失败"
         except Exception as e:
             return False, str(e)
 
@@ -224,8 +247,13 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
-            if data.get("errno") == 0 and data.get("data"):
-                return data["data"][0]
+            if not isinstance(data, dict) or data.get("errno") != 0:
+                return None
+            inner = data.get("data")
+            if isinstance(inner, list) and inner:
+                return inner[0] if isinstance(inner[0], dict) else None
+            if isinstance(inner, dict):
+                return inner
             return None
         except Exception as e:
             logger.error("查询签约信息异常: %s", e)

@@ -14,6 +14,10 @@ gulfsign_config.json.backup_*
 !.dbg/.gitkeep
 .dbg/client_videos/
 .dbg/sign_captures/
+.dbg/*.png
+.dbg/*.jpg
+.dbg/*.html
+.dbg/qr_probe.py
 .DS_Store
 certs/
 traffic_log.txt

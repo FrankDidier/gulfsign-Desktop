@@ -1080,6 +1080,18 @@ class GulfSignApp(tk.Tk):
         ).pack(side=tk.LEFT)
         self.after(80, self._refresh_direct_sign_status)
 
+        # 签约后校验真实状态 + 档案推进落库 (对标其它团队 checkSignStatus/updateDanganInfo)
+        r2c = ttk.Frame(frame)
+        r2c.pack(fill=tk.X, pady=(4, 0))
+        self.var_verify_finalize = tk.BooleanVar(
+            value=bool(self._cfg.get("verify_finalize", False))
+        )
+        ttk.Checkbutton(
+            r2c,
+            text="✔ 校验并推进到「已签约」(确认后回查真实状态, 仍停留在5/6则重提交档案落库)",
+            variable=self.var_verify_finalize,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
         r3 = ttk.Frame(frame)
         r3.pack(fill=tk.X, pady=(4, 0))
 
@@ -2857,8 +2869,20 @@ class GulfSignApp(tk.Tk):
             "hc_doctor": self.var_hc_doctor.get(),
             "hc_start": self.var_hc_start.get(),
             "hc_end": self.var_hc_end.get(),
+            "verify_finalize": bool(
+                getattr(self, "var_verify_finalize", None)
+                and self.var_verify_finalize.get()
+            ),
         }
-        
+
+        # 保留由 self._cfg 直接管理(非本函数 Tk 变量)的高级开关, 否则整文件覆盖会丢失
+        for _k in ("use_direct_sign", "direct_sign_template_path",
+                   "enable_age_bypass"):
+            if (self._cfg or {}).get(_k) is not None:
+                config_data[_k] = self._cfg[_k]
+        if getattr(self, "var_use_direct_sign", None) is not None:
+            config_data["use_direct_sign"] = bool(self.var_use_direct_sign.get())
+
         # 添加许可证配置
         license_user = self.var_license_user.get().strip()
         license_password = self.var_license_password.get().strip()
@@ -3676,6 +3700,10 @@ class GulfSignApp(tk.Tk):
         auto_void = self.var_auto_void.get()
         del_doctor = self.var_del_doctor.get()
         del_resident = self.var_del_resident.get()
+        verify_finalize = bool(
+            getattr(self, "var_verify_finalize", None)
+            and self.var_verify_finalize.get()
+        )
 
         opts = []
         if auto_void:
@@ -3688,6 +3716,8 @@ class GulfSignApp(tk.Tk):
             opts.append("协议期: %s~%s" % (agree_start or "自动", agree_end or "自动"))
         if pop_code != "0":
             opts.append("人群: %s" % self.var_pop_type.get())
+        if verify_finalize:
+            opts.append("校验并推进落库")
         if opts:
             self._log("选项: %s" % ", ".join(opts), "info")
 
@@ -3700,6 +3730,7 @@ class GulfSignApp(tk.Tk):
             "auto_void": auto_void,
             "del_doctor": del_doctor,
             "del_resident": del_resident,
+            "verify_finalize": verify_finalize,
         }
 
         def worker():
@@ -3763,6 +3794,7 @@ class GulfSignApp(tk.Tk):
                     elapsed=ds_res.elapsed,
                 )
             else:
+                _vf = opts.get("verify_finalize", False)
                 result = self.client.sign_one(
                     person_id=patient.person_id,
                     name=patient.name,
@@ -3777,6 +3809,9 @@ class GulfSignApp(tk.Tk):
                     service_type=opts.get("pop_code", "0"),
                     agreement_start=opts.get("agree_start", ""),
                     agreement_end=opts.get("agree_end", ""),
+                    sfzh=(patient.id_card or "").strip(),
+                    verify_final=_vf,
+                    finalize_archive=_vf,
                 )
 
             self.after(0, lambda r=result, idx=i: self._on_sign_result(r, idx))

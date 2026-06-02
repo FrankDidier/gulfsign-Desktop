@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""单元测试: 二维码登录 API 方法.
+"""单元测试: 二维码登录 API 方法 (真实流程: Pg_ScanQrCode.aspx + ACTION=CHECKSM).
 
 验证:
-  1. ``qr_login_generate`` 在服务端返回 code=0 时正确解析 tokenimage / catoken.
-  2. ``qr_login_generate`` 在服务端报错时返回 (False, '', '', error).
-  3. ``qr_login_query`` 正确解析 code (0/1/2/3/4) 与 message.
+  1. ``qr_login_generate`` 从 Pg_ScanQrCode.aspx 页面 HTML 抽取内嵌二维码图像.
+  2. ``qr_login_generate`` 在页面无二维码 / HTTP 错误时返回 (False, '', '', error).
+  3. ``qr_login_query`` 解析 ACTION=CHECKSM 的 opType: 0→通过(0), 1→等待(2).
   4. ``qr_login_query`` 在网络/解析异常时返回 code=-1.
   5. ``qr_login_finalize`` 在主页拉取成功后把 logged_in=True, qr_pending=False.
   6. ``qr_login_finalize`` 在拉取失败 / 缺 token 时返回 (False, ...).
@@ -45,36 +45,33 @@ class TestQrGenerate(unittest.TestCase):
 
     def test_success(self):
         c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(json_obj={
-            "code": 0,
-            "data": {
-                "tokenimage": "data:image/png;base64,iVBOR_FAKE",
-                "catoken": "T-12345",
-            }
-        }))
+        html = (
+            '<html><body><div style="text-align:center">'
+            '<img src="data:image/jpg;base64,/9j/4AAQSkZJRgABAQ_FAKE">'
+            '</div></body></html>'
+        )
+        c.session.get = MagicMock(return_value=_FakeResp(text=html))
         ok, img, tok, err = c.qr_login_generate()
-        self.assertTrue(ok)
-        self.assertIn("data:image/png;base64", img)
-        self.assertEqual(tok, "T-12345")
+        self.assertTrue(ok, err)
+        self.assertIn("data:image/jpg;base64,", img)
+        self.assertEqual(tok, "session")  # 占位符, CHECKSM 用会话 cookie
         self.assertEqual(err, "")
 
-    def test_server_rejects(self):
+    def test_no_qr_image(self):
         c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(json_obj={
-            "code": 1, "message": "已过期",
-        }))
-        ok, img, tok, err = c.qr_login_generate()
-        self.assertFalse(ok)
-        self.assertIn("已过期", err)
-
-    def test_non_json(self):
-        c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(
-            json_obj=None, text="<html>Server Error</html>"
+        c.session.get = MagicMock(return_value=_FakeResp(
+            text="<html><body>无二维码</body></html>"
         ))
         ok, img, tok, err = c.qr_login_generate()
         self.assertFalse(ok)
-        self.assertIn("非 JSON", err)
+        self.assertIn("二维码", err)
+
+    def test_http_error(self):
+        c = _fresh_client()
+        c.session.get = MagicMock(return_value=_FakeResp(status_code=500, text="x"))
+        ok, img, tok, err = c.qr_login_generate()
+        self.assertFalse(ok)
+        self.assertIn("HTTP 500", err)
 
     def test_no_session(self):
         c = PH3Client()
@@ -85,43 +82,37 @@ class TestQrGenerate(unittest.TestCase):
 
 class TestQrQuery(unittest.TestCase):
 
-    def test_code_0(self):
+    def test_optype_0_passed(self):
         c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(json_obj={
-            "code": 0,
-        }))
-        code, msg = c.qr_login_query("T-1")
+        c.session.get = MagicMock(return_value=_FakeResp(json_obj={"opType": 0}))
+        code, msg = c.qr_login_query()
         self.assertEqual(code, 0)
 
-    def test_code_2_waiting(self):
+    def test_optype_1_waiting(self):
         c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(json_obj={
-            "code": 2, "message": "等待扫码",
-        }))
-        code, msg = c.qr_login_query("T-1")
-        self.assertEqual(code, 2)
-        self.assertEqual(msg, "等待扫码")
-
-    def test_code_1_expired(self):
-        c = _fresh_client()
-        c.session.post = MagicMock(return_value=_FakeResp(json_obj={
-            "code": 1, "message": "二维码已过期",
-        }))
-        code, msg = c.qr_login_query("T-1")
-        self.assertEqual(code, 1)
-        self.assertIn("过期", msg)
+        c.session.get = MagicMock(return_value=_FakeResp(json_obj={"opType": 1, "msg": ""}))
+        code, msg = c.qr_login_query()
+        self.assertEqual(code, 2)  # 等待扫码
 
     def test_network_err(self):
         c = _fresh_client()
         import requests
-        c.session.post = MagicMock(side_effect=requests.ConnectionError("boom"))
-        code, msg = c.qr_login_query("T-1")
+        c.session.get = MagicMock(side_effect=requests.ConnectionError("boom"))
+        code, msg = c.qr_login_query()
         self.assertEqual(code, -1)
         self.assertIn("网络", msg)
 
-    def test_no_token(self):
+    def test_non_json(self):
         c = _fresh_client()
-        code, msg = c.qr_login_query("")
+        c.session.get = MagicMock(return_value=_FakeResp(
+            json_obj=None, text="<html>err</html>"
+        ))
+        code, msg = c.qr_login_query()
+        self.assertEqual(code, -1)
+
+    def test_no_session(self):
+        c = PH3Client()
+        code, msg = c.qr_login_query()
         self.assertEqual(code, -1)
 
 

@@ -848,36 +848,40 @@ class PH3Client:
     # 二维码登录 (与原 client.exe getQRCodeImage / finishQRCodeLogin 同接口)
     # ================================================================
     #
-    # 网页登录页 (post_login_content.html) 在用户点击 "扫码登录" 后:
-    #   1. POST /ashx/LoginHandler.ashx?ACTION=GENERATE
-    #      响应: {code:0, data:{tokenimage:"data:image/png;base64,...", catoken:"..."}}
-    #      tokenimage 是直接可用于 <img src="..."> 的 data URL.
-    #   2. 每 2 秒轮询 POST /ashx/LoginHandler.ashx?ACTION=QUERY&token=<catoken>
-    #      响应 code 含义:
-    #        0 = 扫码并通过 → 客户端跳转 FormMain.aspx 完成登录
-    #        1 = 已过期/不可用错误 (message 含原因)
-    #        2 = 等待用户扫码 (继续轮询)
-    #        3, 4 = 其它错误 (message 含原因)
+    # **真实流程 (竞品反编译 + live 实测, 2026-06)**:
+    #   1. GET /Pg_ScanQrCode.aspx?href=<FormMain> — 返回的 HTML 直接内嵌
+    #      <img src="data:image/jpg;base64,..."> 二维码图像 (无需 ajax 生成).
+    #   2. 页面 JS 每 3 秒 GET /ashx/LoginHandler.ashx?ACTION=CHECKSM&t=<ts>
+    #      响应 opType 含义 (实测):
+    #        0 = 扫码并通过 → 跳转 FormMain.aspx 完成登录
+    #        1 = 等待用户扫码 (继续轮询)
+    #   注: 旧实现用的 ACTION=GENERATE / ACTION=QUERY 在本服务器并不存在,
+    #   会触发 HuNanCAServices.getTokenForNew() 404, 已废弃。
     #
-    # 我们把这两个端点封装成 ``qr_login_generate()`` / ``qr_login_query()``,
-    # 复用 self.session (cookies 已经从前面的密码登录步骤拿到), 因此
-    # 服务端能把扫码结果绑回这个会话.
+    # 封装为 ``qr_login_generate()`` / ``qr_login_query()`` / ``qr_login_finalize()``,
+    # 复用 self.session (cookies 来自前面的密码登录步骤), 服务端据此把扫码
+    # 结果绑回本会话.
 
     def qr_login_generate(self) -> Tuple[bool, str, str, str]:
-        """生成二维码 token + 图像 (data URL).
+        """获取二维码图像 (data URL).
+
+        **真实流程 (对照竞品反编译 + 实测 live 服务器)**: 公卫3.0 的扫码登录
+        不是 ``ACTION=GENERATE`` ajax (该路径在本服务器会触发
+        ``HuNanCAServices.getTokenForNew()`` 404)。真实做法是 GET
+        ``/Pg_ScanQrCode.aspx?href=<FormMain>``, 该页面 HTML 里**直接内嵌**
+        ``<img src="data:image/jpg;base64,...">`` 二维码; 轮询用
+        ``ACTION=CHECKSM`` (基于会话 cookie), 因此无需单独的 catoken。
 
         Returns: (success, tokenimage_data_url, catoken, error_message)
-        ``tokenimage_data_url`` 形如 ``data:image/png;base64,iVBOR...``,
-        可直接喂给 PIL/tkinter 显示, 也可写到磁盘 PNG.
+        为兼容调用方 (qr_login_dialog), ``catoken`` 返回占位符 ``"session"``。
         """
         if not self.session or not self.base_url:
             return False, "", "", "尚未发起登录会话"
 
         try:
-            resp = self.session.post(
-                self._url("/ashx/LoginHandler.ashx"),
-                params={"ACTION": "GENERATE"},
-                headers={"X-Requested-With": "XMLHttpRequest"},
+            resp = self.session.get(
+                self._url("/Pg_ScanQrCode.aspx"),
+                params={"href": self._url("/FormMain.aspx")},
                 timeout=self._timeout,
             )
         except requests.RequestException as e:
@@ -886,39 +890,35 @@ class PH3Client:
         if resp.status_code != 200:
             return False, "", "", "HTTP %d" % resp.status_code
 
-        try:
-            obj = resp.json()
-        except Exception:
-            return False, "", "", "服务器返回非 JSON: %s" % (resp.text or "")[:160]
+        m = re.search(
+            r'<img[^>]+src=["\'](data:image/[^"\']+;base64,[^"\']+)["\']',
+            resp.text, re.I,
+        )
+        if not m:
+            return False, "", "", "二维码页面未找到二维码图像 (服务端流程可能已变化)"
 
-        if obj.get("code") != 0:
-            return False, "", "", obj.get("message") or "服务端拒绝生成二维码"
+        return True, m.group(1), "session", ""
 
-        data = obj.get("data") or {}
-        tokenimage = data.get("tokenimage") or ""
-        catoken = data.get("catoken") or ""
-        if not tokenimage or not catoken:
-            return False, "", "", "服务端响应缺少 tokenimage / catoken"
-
-        return True, tokenimage, catoken, ""
-
-    def qr_login_query(self, catoken: str) -> Tuple[int, str]:
+    def qr_login_query(self, catoken: str = "") -> Tuple[int, str]:
         """轮询一次扫码状态.
+
+        **真实流程**: GET ``/ashx/LoginHandler.ashx?ACTION=CHECKSM&t=<ts>`` —
+        页面 JS 每 3 秒轮询, ``opType==0`` 时跳转 FormMain.aspx 表示扫码通过;
+        其它 (实测 ``opType==1``) 表示仍在等待。``catoken`` 参数已废弃 (保留
+        以兼容调用方), 因为 CHECKSM 完全依赖会话 cookie。
 
         Returns: (code, message)
           0 = 通过, 应调 ``qr_login_finalize()`` 完成登录.
-          1 = 错误/过期 (message).
           2 = 等待扫码 (继续轮询).
-          3, 4 = 其它错误.
           -1 = 网络/解析失败 (调用方可决定继续轮询或终止).
         """
-        if not self.session or not self.base_url or not catoken:
-            return -1, "尚未生成二维码"
+        if not self.session or not self.base_url:
+            return -1, "尚未发起登录会话"
 
         try:
-            resp = self.session.post(
+            resp = self.session.get(
                 self._url("/ashx/LoginHandler.ashx"),
-                params={"ACTION": "QUERY", "token": catoken},
+                params={"ACTION": "CHECKSM", "t": str(int(time.time() * 1000))},
                 headers={"X-Requested-With": "XMLHttpRequest"},
                 timeout=self._timeout,
             )
@@ -933,7 +933,9 @@ class PH3Client:
         except Exception:
             return -1, "服务器返回非 JSON"
 
-        return int(obj.get("code", -1)), obj.get("message") or ""
+        if obj.get("opType") == 0:
+            return 0, obj.get("msg") or "扫码通过"
+        return 2, obj.get("msg") or "等待扫码"
 
     def qr_login_finalize(self) -> Tuple[bool, str]:
         """扫码通过后, 完成登录: 拉 FormMain.aspx → 提取 token / 用户信息 / org_code.
@@ -1476,16 +1478,20 @@ class PH3Client:
         self, teams: List[Dict], team_name: str = "", team_id: str = ""
     ) -> Tuple[str, str]:
         """在团队列表中匹配，返回 (team_guid, team_name)。"""
+        clean = [
+            t for t in teams
+            if isinstance(t, dict) and t.get("id") and t.get("name")
+        ]
         if team_id:
-            for t in teams:
+            for t in clean:
                 if t["id"] == team_id:
                     return t["id"], t["name"]
         if team_name:
-            for t in teams:
+            for t in clean:
                 if team_name in t["name"] or t["name"] in team_name:
                     return t["id"], t["name"]
-        if teams:
-            return teams[0]["id"], teams[0]["name"]
+        if clean:
+            return clean[0]["id"], clean[0]["name"]
         return "", ""
 
     def initiate_signing(
@@ -1615,7 +1621,9 @@ class PH3Client:
             import json as _json
             try:
                 obj = _json.loads(text)
-                if obj.get("opType") == 0:
+                if not isinstance(obj, dict):
+                    raise ValueError("non-dict json")
+                if obj.get("opType") in (0, "0"):
                     cc = (
                         obj.get("type", "")
                         or obj.get("CONTRACT_CODE", "")
@@ -1645,6 +1653,16 @@ class PH3Client:
                 return SignResult(
                     False, person_id, patient_name,
                     error=err_m.group(1) if err_m else "表单返回异常",
+                    step="initiate", elapsed=elapsed,
+                )
+
+            # 非 JSON 响应: 只有真正抓到 36 位合同号才算成功。
+            # 之前: 没拿到 cc 也返回 success=True (误报) —— 现在改为失败,
+            # 避免把"未知/HTML/空响应"当成发起成功 (上游会据此继续 confirm).
+            if not cc:
+                return SignResult(
+                    False, person_id, patient_name,
+                    error="发起返回非预期响应(无 opType / 无合同号), 无法确认是否成功",
                     step="initiate", elapsed=elapsed,
                 )
 
@@ -1938,7 +1956,7 @@ class PH3Client:
             import json as _json
             try:
                 obj = _json.loads(body)
-                if obj.get("opType") == 0:
+                if isinstance(obj, dict) and obj.get("opType") in (0, "0"):
                     return SignResult(
                         True, person_id, name,
                         contract_code=contract_code,
@@ -1982,7 +2000,7 @@ class PH3Client:
             obj = _json.loads((text or "").strip())
         except Exception:
             return False
-        return obj.get("opType") == 0
+        return isinstance(obj, dict) and obj.get("opType") in (0, "0")
 
     def delete_signing(self, contract_code: str) -> bool:
         """删除一条签约记录（ACTION=3），适用于status=5/6。"""
@@ -2135,6 +2153,219 @@ class PH3Client:
         except Exception as e:
             return False, "修改异常: %s" % str(e)
 
+    # ---- 状态校验 + 档案推进 (对标竞品 checkSignStatus / updateDanganInfo) ----
+
+    def check_sign_status_by_sfzh(
+        self, sfzh: str, name: str = "", org_code: str = ""
+    ) -> Tuple[str, str, str, str]:
+        """按身份证号查询某居民的真实签约状态（只读）。
+
+        对标竞品 ``ggws_session.checkSignStatus``：竞品用
+        ``action=4 + POST SFZH/ISDAZT=0/PAGEINDEX=1`` 查询并读取状态文本。
+        本实现复用 :meth:`query_patients` 的网格查询（同一 ``Do_B0105_Handler.ashx``
+        ``action=4`` 接口，``_DEFAULT_QUERY_FORM`` 已含 ``SFZH``/``ISDAZT=0``）。
+
+        返回 ``(status_code, status_text, person_id, contract_code)``。
+        其中 ``status_code`` 取值见 :data:`_STATUS_MAP`（``0`` 已签约 / ``5`` 医生申请
+        / ``6`` 居民申请 …）。查不到或失败统一返回 ``("", "", "", "")``，
+        调用方据此判断"无法确认"，**不得**把无法确认当成功。
+        """
+        sfzh = (sfzh or "").strip()
+        if not sfzh:
+            return "", "", "", ""
+        if not self.logged_in or self.qr_pending:
+            return "", "", "", ""
+
+        filters: Dict[str, str] = {"SFZH": sfzh}
+        if name and name.strip():
+            filters["XM"] = name.strip()
+
+        try:
+            patients, _ = self.query_patients(
+                org_code=org_code, extra_filters=filters
+            )
+        except Exception as e:
+            logger.warning("查询签约状态失败: %s", e)
+            return "", "", "", ""
+
+        if not patients:
+            return "", "", "", ""
+
+        chosen = None
+        for p in patients:
+            if (p.id_card or "").strip() == sfzh:
+                chosen = p
+                break
+        if chosen is None:
+            # 无精确身份证匹配时: 只有"唯一一条且其身份证被脱敏(含 *)"才退而
+            # 取之 —— 否则宁可返回空(无法确认), 也绝不报告别人的状态(防止误判).
+            if len(patients) == 1 and "*" in (patients[0].id_card or ""):
+                chosen = patients[0]
+            else:
+                return "", "", "", ""
+
+        return (
+            chosen.contract_status or "",
+            chosen.status_text or "",
+            chosen.person_id or "",
+            chosen.contract_code or "",
+        )
+
+    def finalize_via_archive(
+        self,
+        person_id: str,
+        sfzh: str = "",
+        name: str = "",
+        org_code: str = "",
+        max_retries: int = 3,
+        sleep_between: float = 3.0,
+        _sleep: Optional[Callable] = None,
+    ) -> SignResult:
+        """把停留在"居民申请/医生申请"的签约推进到"已签约"（对标竞品 updateDanganInfo）。
+
+        机制（来自竞品 ``ggws_session.updateDanganInfo`` 反编译）：公卫系统要求
+        居民**核心档案 (B0101)** 完整后，合同才会落库为"已签约"。竞品的做法是
+        重新加载并 POST 一次 B0101 档案（内容不变，``ACTION=2``）触发服务端
+        重新校验/落库，然后回查状态，循环到"已签约"或重试用尽（``sleep(3)`` 间隔）。
+
+        流程::
+
+            for _ in range(max_retries):
+                查状态 -> 已签约? 直接返回成功
+                modify_archive(person_id, {})   # 重新提交档案
+                sleep(sleep_between)
+            最终回查 -> 已签约? 成功 : 失败(诚实报告真实状态)
+
+        必须提供 ``sfzh`` 才能确认结果；没有 ``sfzh`` 时无法核实，返回
+        ``success=False`` 并注明"无法确认"，避免误报。
+
+        返回 :class:`SignResult`。``_sleep`` 仅用于测试注入。
+        """
+        _sleep = _sleep or time.sleep
+        if not self.logged_in:
+            return SignResult(False, person_id, name, error="未登录", step="finalize")
+        if self.qr_pending:
+            return SignResult(
+                False, person_id, name,
+                error="登录不完整: 需要二维码验证", step="finalize",
+            )
+
+        retries = max(1, int(max_retries))
+        last_text = ""
+        last_cc = ""
+
+        for attempt in range(retries):
+            if sfzh:
+                code, text, pid, cc = self.check_sign_status_by_sfzh(
+                    sfzh, name, org_code
+                )
+                if text:
+                    last_text = text
+                if cc:
+                    last_cc = cc
+                if code == "0":
+                    return SignResult(
+                        True, person_id or pid, name,
+                        contract_code=cc or last_cc, step="finalize_verified",
+                    )
+                if pid and not person_id:
+                    person_id = pid
+
+            if not person_id:
+                return SignResult(
+                    False, person_id, name,
+                    error="缺少 person_id, 无法提交档案", step="finalize",
+                )
+
+            ok, msg = self.modify_archive(person_id, {})
+            if not ok and not last_text:
+                last_text = msg  # 仅作诊断, 不致命: 继续重试
+
+            if attempt < retries - 1:
+                _sleep(sleep_between)
+
+        if sfzh:
+            code, text, pid, cc = self.check_sign_status_by_sfzh(sfzh, name, org_code)
+            if code == "0":
+                return SignResult(
+                    True, person_id or pid, name,
+                    contract_code=cc or last_cc, step="finalize_verified",
+                )
+            return SignResult(
+                False, person_id, name, contract_code=last_cc,
+                error="档案已重提交但仍未落库为已签约 (当前: %s)"
+                % (text or last_text or "未知状态"),
+                step="finalize",
+            )
+
+        return SignResult(
+            False, person_id, name,
+            error="已提交档案但缺少身份证号, 无法确认是否落库为已签约",
+            step="finalize",
+        )
+
+    def _verify_and_finalize(
+        self,
+        r: SignResult,
+        person_id: str,
+        sfzh: str = "",
+        name: str = "",
+        verify_final: bool = False,
+        finalize_archive: bool = False,
+        finalize_retries: int = 3,
+    ) -> SignResult:
+        """对一次签约结果做真实状态校验, 可选触发档案推进。
+
+        - ``verify_final`` 且有 ``sfzh``: 回查真实状态。
+            * 真实=已签约 -> 标记 success, step="verified_signed"。
+            * 真实=医生/居民申请 且 ``finalize_archive`` -> 走档案推进。
+            * 否则若 confirm 自称成功但真实未落库 -> **诚实改判 success=False**。
+        - 查不到状态(code="") -> 无法确认, **保持原结果不动**(不误报也不误杀)。
+        """
+        if not verify_final or not (sfzh or "").strip():
+            return r
+
+        code, text, vpid, vcc = self.check_sign_status_by_sfzh(sfzh, name)
+
+        if code == "0":
+            r.success = True
+            r.step = "verified_signed"
+            r.error = ""
+            if vcc:
+                r.contract_code = vcc
+            return r
+
+        if finalize_archive and code in ("5", "6"):
+            rf = self.finalize_via_archive(
+                vpid or person_id, sfzh=sfzh, name=name,
+                max_retries=finalize_retries,
+            )
+            if rf.success:
+                r.success = True
+                r.step = "finalized_via_archive"
+                r.error = ""
+                r.contract_code = rf.contract_code or r.contract_code
+            else:
+                r.success = False
+                r.step = "verify_failed"
+                r.error = rf.error or (
+                    "确认后仍未签约 (状态: %s)" % (text or code or "未知")
+                )
+            return r
+
+        # 已知的"未落库"状态: confirm 自称成功也要诚实改判
+        if r.success and code in ("1", "4", "5", "6"):
+            r.success = False
+            r.step = "verify_failed"
+            r.error = "确认成功但实际状态为 %s, 未落库为已签约" % (text or code)
+        elif r.success and code == "":
+            # 要求校验却查不到真实状态: 保留 success(不误杀真实成功), 但把
+            # step 标成 unverified 让调用方/UI 看见"未经证实", 不静默当已核实.
+            r.step = "unverified"
+
+        # code == "" 且 r 本就失败: 保持原结果
+        return r
+
     # ---- 完整签约 (发起+确认) ----
 
     def sign_one(
@@ -2154,6 +2385,10 @@ class PH3Client:
         agreement_start: str = "",
         agreement_end: str = "",
         period: str = "1",
+        sfzh: str = "",
+        verify_final: bool = False,
+        finalize_archive: bool = False,
+        finalize_retries: int = 3,
     ) -> SignResult:
         """签约一位居民。
 
@@ -2164,6 +2399,12 @@ class PH3Client:
         - status=6 (居民申请): 直接确认 → 已签约
         - status=1 (未签约) 或无状态: 发起签约
         - status=5 (医生申请): 已发起，尝试确认
+
+        校验/落库选项（对标竞品）：
+        - verify_final + sfzh: 签约后回查**真实状态**，把"自称成功实则停留在
+          5/6"的误报诚实改判为失败 (step="verify_failed")。
+        - finalize_archive: 真实状态仍为 5/6 时，重提交核心档案 (B0101) 把合同
+          推进到"已签约" (对标竞品 updateDanganInfo)；成功则 step="finalized_via_archive"。
         """
         t0 = time.time()
 
@@ -2205,14 +2446,24 @@ class PH3Client:
 
         if contract_status == "6" and contract_code:
             r = self.confirm_signing(person_id, contract_code, name)
+            r = self._verify_and_finalize(
+                r, person_id, sfzh=sfzh, name=r.name or name,
+                verify_final=verify_final, finalize_archive=finalize_archive,
+                finalize_retries=finalize_retries,
+            )
             r.elapsed = time.time() - t0
             return r
 
         if contract_status == "5" and contract_code:
             r = self.confirm_signing(person_id, contract_code, name)
-            r.elapsed = time.time() - t0
             # 之前: confirm 失败时仍返回 success=True / step="initiate".
             # 修复: 失败原样返回 (success=False, step="confirm"), 让 UI 看到真实错误.
+            r = self._verify_and_finalize(
+                r, person_id, sfzh=sfzh, name=r.name or name,
+                verify_final=verify_final, finalize_archive=finalize_archive,
+                finalize_retries=finalize_retries,
+            )
+            r.elapsed = time.time() - t0
             return r
 
         r1 = self.initiate_signing(
@@ -2244,6 +2495,12 @@ class PH3Client:
         time.sleep(delay)
 
         r2 = self.confirm_signing(person_id, cc, pname)
-        r2.elapsed = time.time() - t0
+        r2.contract_code = r2.contract_code or cc
         # confirm 失败 -> success=False (之前会被错误地标 success=True / step="initiate")
+        r2 = self._verify_and_finalize(
+            r2, person_id, sfzh=sfzh, name=pname,
+            verify_final=verify_final, finalize_archive=finalize_archive,
+            finalize_retries=finalize_retries,
+        )
+        r2.elapsed = time.time() - t0
         return r2
