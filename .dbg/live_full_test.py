@@ -73,7 +73,24 @@ def do_qr_flow(c):
         print("  >>> 请用微信/对应 APP 扫描该 PNG (%d 秒内)" % QR_WAIT_SECONDS)
 
     waited = 0.0
+    last_raw = None
     while waited < QR_WAIT_SECONDS:
+        # 诊断: 直接打 CHECKSM 看原始响应, 变化时打印 (帮助判断扫码到底有没有改变服务端状态)
+        try:
+            import time as _t
+            dbg = c.session.get(
+                c._url("/ashx/LoginHandler.ashx"),
+                params={"ACTION": "CHECKSM", "t": str(int(_t.time() * 1000))},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                timeout=c._timeout,
+            )
+            raw = (dbg.text or "")[:200]
+            if raw != last_raw:
+                print("  [CHECKSM 原始响应变化] HTTP %d: %s" % (dbg.status_code, raw))
+                last_raw = raw
+        except Exception as _e:
+            print("  [CHECKSM 诊断请求失败] %s" % _e)
+
         code, m = c.qr_login_query(catoken)
         if code == 0:
             print("  ✓ 扫码通过, 正在完成登录...")
