@@ -551,6 +551,7 @@ class GulfSignApp(tk.Tk):
 
         self._proxy: Optional[OpenIDProxy] = None
         self._proxy_running = False
+        self._captured_wechatcode: str = ""
 
         self._cap_proxy: Optional[OpenIDProxy] = None
         self._cap_running = False
@@ -1840,12 +1841,16 @@ class GulfSignApp(tk.Tk):
         def on_openid_found(openid):
             self.after(0, lambda oid=openid: self._on_openid_captured(oid))
 
+        def on_wechatcode_found(code):
+            self.after(0, lambda c=code: self._on_wechatcode_captured(c))
+
         def on_proxy_log(msg, tag=""):
             self._proxy_log(msg, tag)
 
         self._proxy = OpenIDProxy(
             port=port,
             on_openid=on_openid_found,
+            on_wechatcode=on_wechatcode_found,
             on_log=on_proxy_log,
         )
 
@@ -1909,6 +1914,18 @@ class GulfSignApp(tk.Tk):
         if openid not in items:
             self.openid_listbox.insert(tk.END, openid)
             self._proxy_log("已捕获 OpenID: %s" % openid, "ok")
+
+    def _on_wechatcode_captured(self, code: str):
+        """缓存抓包捕获的 Wechatcode — 供免人脸人群 (<18/>60) 自动绑卡使用。
+
+        同一 Wechatcode 可绑定一批 (最多 9 张) 健康卡; 仅本机内存保存, 不落盘。
+        """
+        if not code:
+            return
+        self._captured_wechatcode = code
+        self._proxy_log(
+            "★ 已捕获 Wechatcode (可用于免人脸人群自动绑卡): %s..." % code[:12], "ok"
+        )
 
     def _on_use_openid(self):
         sel = self.openid_listbox.curselection()
@@ -2242,11 +2259,15 @@ class GulfSignApp(tk.Tk):
         def on_sign_captured(record):
             self.after(0, lambda r=record: self._on_sign_request_captured(r))
 
+        def on_wechatcode(code):
+            self.after(0, lambda c=code: self._on_wechatcode_captured(c))
+
         self._cap_proxy = OpenIDProxy(
             port=8888,
             on_openid=on_openid,
             on_log=on_log,
             on_sign_captured=on_sign_captured,
+            on_wechatcode=on_wechatcode,
         )
 
         if self._cap_proxy.start():

@@ -1117,6 +1117,120 @@ class SigningEngine:
         return False, msg
 
     # ================================================================
+    # Auto-bind + sign (no-face population: <18 / >60)
+    # ================================================================
+
+    def bind_then_sign(
+        self,
+        name: str,
+        id_card: str,
+        orgcode: str,
+        wechatcode: str,
+        phone: str = "",
+        nation: str = "01",
+        relation: str = "6",
+        team_name: str = "",
+        team_guid: str = "",
+        doctor_name: str = "",
+        package_names: str = "",
+        package_guids: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period_years: str = "3",
+        log_cb: Optional[Callable] = None,
+    ) -> FullSignResult:
+        """免人脸人群 (<18 或 >60) 全自动: 绑卡 → 查询 → (建合同) → 确认。
+
+        关键约束 (来自 ``regist.js`` + 创意突破报告 v9):
+          * 健康卡注册页从 **身份证号内嵌出生年** 判断年龄;
+            ``age<18`` 或 ``age>60`` → **免腾讯人脸**, 仅需一个有效 ``Wechatcode``
+            (由抓包代理在微信打开健康卡页时捕获, 同一 code 可绑一整批)。
+          * ``18<=age<=60`` → 注册必须过腾讯人脸 (``verifyResult``), **无法纯自动
+            绑卡**; 此处诚实返回失败, 提示走人工绑卡 (或先做年龄绕行再人工绑)。
+
+        绑卡成功后复用既有 :meth:`process_card_full` (updateRpc→query→create→editqr)。
+        """
+
+        def log(msg, tag=""):
+            if log_cb:
+                log_cb(msg, tag)
+
+        res = FullSignResult(success=False, name=name)
+
+        sfzh = (id_card or "").strip()
+        if len(sfzh) != 18:
+            res.error = "需要 18 位身份证号才能绑卡"
+            res.step = "bind_input"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        age = get_age_from_id(sfzh)
+        if age < 0:
+            res.error = "无法从身份证号解析年龄 (可能被脱敏)"
+            res.step = "bind_input"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        if 18 <= age <= 60:
+            res.error = (
+                "18-60 岁绑卡需腾讯人脸验证 (verifyResult), 无法纯自动绑卡; "
+                "请人工在微信完成绑卡后再用本工具自动签约"
+            )
+            res.step = "bind_needs_face"
+            res.age_bypass_blocked_reason = res.error
+            log("  ⊘ %s" % res.error, "warn")
+            return res
+
+        if not wechatcode:
+            res.error = (
+                "缺少 Wechatcode — 请先在微信打开\"我的健康卡\"页, 由抓包代理捕获 "
+                "(同一 Wechatcode 可绑定一批最多 9 张卡)"
+            )
+            res.step = "bind_no_wechatcode"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        # 1. 绑卡 (免人脸)
+        log("  绑卡 (年龄 %d, 免人脸): %s" % (age, name), "info")
+        ok, msg = self.hc.register_health_card(
+            wechatcode=wechatcode, id_card=sfzh, name=name,
+            phone=phone or "", nation=nation, relation=relation,
+        )
+        if not ok:
+            res.error = "绑卡失败: %s" % msg
+            res.step = "bind"
+            log("  ✗ %s" % res.error, "err")
+            return res
+        log("  ✓ 健康卡已绑定: %s" % name, "ok")
+
+        # 2. 重新拉卡列表, 找到刚绑的卡 (按姓名 + 身份证尾号匹配)
+        card = None
+        for c in self.hc.get_card_list():
+            if c.name != name:
+                continue
+            cid = (c.id_card or "").strip()
+            if (not cid) or ("*" in cid) or (cid[-4:] == sfzh[-4:]):
+                card = c
+                break
+        if card is None:
+            res.error = "绑卡后未在卡列表中找到该卡 (稍后可重试)"
+            res.step = "bind_relist"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        # 3. 复用完整签约流程
+        inner = self.process_card_full(
+            card, orgcode=orgcode, team_name=team_name, team_guid=team_guid,
+            doctor_name=doctor_name, package_names=package_names,
+            package_guids=package_guids, start_date=start_date,
+            end_date=end_date, period_years=period_years,
+            auto_create=True, log_cb=log_cb,
+        )
+        if not inner.name:
+            inner.name = name
+        return inner
+
+    # ================================================================
     # Batch processing
     # ================================================================
 
