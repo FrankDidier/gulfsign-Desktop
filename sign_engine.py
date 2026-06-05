@@ -128,6 +128,30 @@ class FullSignResult:
     age_bypass_blocked_reason: str = ""
 
 
+@dataclass
+class HouseholdSignResult:
+    """户主代申请的汇总结果。
+
+    把一个户主 openid 名下绑定的全部家庭成员卡的逐人签约结果聚合起来,
+    便于 UI / 报告展示 "这一户 N 口人, 成功 M 人"。
+    """
+    openid: str = ""
+    head_name: str = ""
+    total: int = 0
+    succeeded: int = 0          # result.success == True (含 already_signed)
+    confirmed: int = 0          # 本次真正 editqr 确认成功
+    created: int = 0            # 本次新建了居民申请合同
+    already_signed: int = 0     # 早已是已签约, 跳过
+    failed: int = 0
+    results: List[FullSignResult] = field(default_factory=list)
+    error: str = ""
+
+    @property
+    def success(self) -> bool:
+        """整户视角: 至少处理了 1 人, 且无失败, 且无整体错误。"""
+        return bool(self.total) and self.failed == 0 and not self.error
+
+
 # ---------------------------------------------------------------------------
 # Age-bypass eligibility precheck
 # ---------------------------------------------------------------------------
@@ -1229,6 +1253,173 @@ class SigningEngine:
         if not inner.name:
             inner.name = name
         return inner
+
+    # ================================================================
+    # Household-head application (户主代申请) — sign every family member
+    # bound under ONE head-of-household openid, in one pass.
+    # ================================================================
+    #
+    # 机制依据 (对方内部聊天截图 + 本仓库 ph3_status6 探针报告互相印证):
+    #   * "居民申请(STATUS=6)" 只能由居民端 (健康卡/微信) 经 insertJtysqy 产生;
+    #     公卫医生端只能产出 STATUS=5, 且 5 无法被确认成已签约.
+    #   * 微信"我的健康卡"里, 户主可以给"自己户口下面的人"批量申请家庭签约
+    #     (隐藏入口). 在本平台上, 这等价于: 家庭成员的健康卡都绑在同一个
+    #     户主 openid 下 (newlist 一次性返回全部), 而 insertJtysqy / editqr
+    #     全程使用户主的 openid (self.hc.openid) 对每张成员卡发起 + 确认.
+    #   * 因此 "户主代申请" 不需要给每个人单独绑卡/过人脸 —— 一个户主 openid
+    #     覆盖一整户. 绑定数量按"户"算, 不按"人"算.
+    #
+    # 诚实边界: 成员卡必须已绑定到该户主 openid 下 (家庭关系由平台维护).
+    # 绑定本身仍受"真实微信凭据 + 18-60 需人脸"约束 (见 bind_then_sign);
+    # 本方法只负责"已在户下的成员"的批量签约/确认, 不伪造家庭关系.
+
+    def list_household_members(self) -> List[HealthCard]:
+        """列出户主 openid 名下绑定的全部家庭成员健康卡 (newlist)。
+
+        返回的每张卡含 ``relation`` (与户主的关系) 与 ``age`` 等字段,
+        供 UI / 报告展示 "这一户有哪些人"。未连接时返回空列表。
+        """
+        if not self.hc.connected:
+            return []
+        return self.hc.get_card_list()
+
+    def process_household(
+        self,
+        orgcode: str,
+        team_name: str = "",
+        team_guid: str = "",
+        doctor_name: str = "",
+        package_names: str = "",
+        package_guids: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period_years: str = "3",
+        auto_create: bool = True,
+        members: Optional[List[HealthCard]] = None,
+        relation_filter: Optional[Callable[[HealthCard], bool]] = None,
+        delay: float = 0.5,
+        log_cb: Optional[Callable] = None,
+        progress_cb: Optional[Callable] = None,
+        stop_check: Optional[Callable] = None,
+    ) -> HouseholdSignResult:
+        """户主代申请: 对户主 openid 名下绑定的全部家庭成员逐人签约+确认。
+
+        每位成员都复用 :meth:`process_card_full`
+        (updateRpc → query → insertJtysqy(STATUS=6) → editqr 确认),
+        且全程使用同一个户主 ``openid``, 无需为成员逐人绑卡/过人脸。
+
+        参数:
+          members          : 显式给定成员卡列表; 缺省则调 newlist 自动拉取。
+          relation_filter  : 可选过滤器, 返回 True 才处理该成员
+                             (例如只签未成年/老人, 或排除户主本人)。
+          其余参数语义同 :meth:`process_card_full`。
+
+        返回 :class:`HouseholdSignResult` 聚合结果。
+        """
+
+        def log(msg, tag=""):
+            if log_cb:
+                log_cb(msg, tag)
+
+        summary = HouseholdSignResult(openid=getattr(self.hc, "openid", ""))
+
+        if not self.hc.connected:
+            summary.error = "未连接健康卡平台 (请先用户主 openid 连接)"
+            log("  ✗ %s" % summary.error, "err")
+            return summary
+
+        if members is None:
+            members = self.list_household_members()
+
+        if not members:
+            summary.error = (
+                "户主 openid 名下未查到任何健康卡 — "
+                "请确认该 openid 已在微信绑定本人及家庭成员的健康卡"
+            )
+            log("  ✗ %s" % summary.error, "err")
+            return summary
+
+        # 记录户主姓名 (取关系标记为本人/户主的那张, 否则第一张)
+        for c in members:
+            rel = (c.relation or "").strip()
+            if rel in ("本人", "户主", "0", "1", "6"):
+                summary.head_name = c.name
+                break
+        if not summary.head_name and members:
+            summary.head_name = members[0].name
+
+        if relation_filter is not None:
+            members = [c for c in members if relation_filter(c)]
+            if not members:
+                summary.error = "按关系过滤后无可处理的家庭成员"
+                log("  ⊘ %s" % summary.error, "warn")
+                return summary
+
+        summary.total = len(members)
+        log(
+            "  户主 [%s] 名下家庭成员 %d 人, 开始代申请签约"
+            % (summary.head_name or "?", summary.total),
+            "info",
+        )
+
+        for i, card in enumerate(members):
+            if stop_check and stop_check():
+                log("  ⊘ 用户中止, 已处理 %d/%d" % (i, summary.total), "warn")
+                break
+
+            rel = (card.relation or "").strip()
+            log(
+                "处理 [%d/%d] %s%s"
+                % (
+                    i + 1, summary.total, card.name,
+                    " (与户主关系: %s)" % rel if rel else "",
+                ),
+                "info",
+            )
+
+            r = self.process_card_full(
+                card,
+                orgcode=orgcode,
+                team_name=team_name,
+                team_guid=team_guid,
+                doctor_name=doctor_name,
+                package_names=package_names,
+                package_guids=package_guids,
+                start_date=start_date,
+                end_date=end_date,
+                period_years=period_years,
+                auto_create=auto_create,
+                log_cb=log_cb,
+            )
+            summary.results.append(r)
+
+            if r.success:
+                summary.succeeded += 1
+                if r.step == "already_signed":
+                    summary.already_signed += 1
+                if r.contract_confirmed:
+                    summary.confirmed += 1
+                if r.contract_created:
+                    summary.created += 1
+            else:
+                summary.failed += 1
+
+            if progress_cb:
+                progress_cb(i, summary.total, r)
+
+            if delay > 0 and i < summary.total - 1:
+                time.sleep(delay)
+
+        log(
+            "  户 [%s] 完成: 共 %d 人, 成功 %d (确认 %d / 新建 %d / 已签 %d), 失败 %d"
+            % (
+                summary.head_name or "?", summary.total, summary.succeeded,
+                summary.confirmed, summary.created, summary.already_signed,
+                summary.failed,
+            ),
+            "ok" if summary.success else "warn",
+        )
+        return summary
 
     # ================================================================
     # Batch processing
