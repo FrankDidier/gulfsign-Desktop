@@ -36,6 +36,7 @@ from proxy_capture import (
 )
 from license_client import LicenseClient
 from config_manager import ConfigManager
+import hc_diagnostics
 from batch_processor import BatchProcessor, SuccessLogger, AgeBypassAuditLogger
 from qr_login_dialog import QRLoginDialog
 
@@ -559,6 +560,12 @@ class GulfSignApp(tk.Tk):
         # 抓到的家医签约 POST 模板列表 (saved JSON paths, 最新在前)
         self._sign_capture_records: list = []
 
+        # 状态取证 (snapshot 前后对比)
+        self._diag_before_path: str = ""
+        self._diag_after_path: str = ""
+        self._diag_last_report: str = ""
+        self._diag_busy = False
+
         self.capability_profile = {
             "mode": "unknown",
             "reason": "未检测",
@@ -634,17 +641,20 @@ class GulfSignApp(tk.Tk):
         tab3 = ttk.Frame(self.notebook, padding=4)
         tab4 = ttk.Frame(self.notebook, padding=4)
         tab5 = ttk.Frame(self.notebook, padding=4)
+        tab6 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
         self.notebook.add(tab3, text=" 获取OpenID ")
         self.notebook.add(tab4, text=" 流量抓包 ")
+        self.notebook.add(tab6, text=" 状态取证 ")
         self.notebook.add(tab5, text=" 许可证配置 ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
         self._build_openid_tab(tab3)
         self._build_capture_tab(tab4)
+        self._build_diag_tab(tab6)
         self._build_license_tab(tab5)
 
     # ================================================================
@@ -2980,6 +2990,253 @@ class GulfSignApp(tk.Tk):
         self.hc_log_text.configure(state=tk.NORMAL)
         self.hc_log_text.delete("1.0", tk.END)
         self.hc_log_text.configure(state=tk.DISABLED)
+
+    # ================================================================
+    # Tab 6: 状态取证 (snapshot 前后对比, 只读)
+    # ================================================================
+
+    def _diag_base_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, "logs", "状态取证")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _build_diag_tab(self, parent):
+        # --- 操作指引 ---
+        guide = ttk.LabelFrame(parent, text=" 操作指引（请按 ①②③ 顺序）", padding=8)
+        guide.pack(fill=tk.X, pady=(0, 8))
+
+        guide_text = (
+            "本页用于「取证」：把绑卡/签约前后的健康卡状态完整记录下来并对比，\n"
+            "生成一个日志文件发回给我们分析。全程只读，不会修改任何数据。\n"
+            "\n"
+            "如何获取 OpenID：到「获取OpenID」标签 → 启动代理 → 电脑版微信打开\n"
+            "小程序“我的健康卡” → 列表里会出现 OpenID → 选中点“★ 使用选中的OpenID”，\n"
+            "它会自动填到「健康卡确认」页；本页可点下方“↙ 用健康卡页OpenID”带入。\n"
+            "\n"
+            "步骤：① 先点【签约前快照】 → ② 去微信绑卡/让这几个人签约 →\n"
+            "      ③ 回来点【签约后快照】 → 再点【生成对比日志】 → 把日志发给我们。"
+        )
+        ttk.Label(guide, text=guide_text, justify=tk.LEFT,
+                  foreground="#374151").pack(anchor=tk.W)
+
+        # --- OpenID 输入 ---
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(row, text="户主 OpenID：", font=("", 10, "bold")).pack(side=tk.LEFT)
+        self.var_diag_openid = tk.StringVar(value=self.var_hc_openid.get())
+        ttk.Entry(row, textvariable=self.var_diag_openid, width=42).pack(
+            side=tk.LEFT, padx=(4, 8))
+        ttk.Button(row, text="↙ 用健康卡页OpenID",
+                   command=self._diag_use_hc_openid).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row, text="去抓取OpenID",
+                   command=lambda: self.notebook.select(2)).pack(side=tk.LEFT)
+
+        # --- 三个步骤按钮 ---
+        steps = ttk.Frame(parent)
+        steps.pack(fill=tk.X, pady=(0, 6))
+        self.btn_diag_before = ttk.Button(
+            steps, text="① 签约前快照 (BEFORE)",
+            command=lambda: self._on_diag_snapshot("before"))
+        self.btn_diag_before.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_diag_after = ttk.Button(
+            steps, text="② 签约后快照 (AFTER)",
+            command=lambda: self._on_diag_snapshot("after"))
+        self.btn_diag_after.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_diag_diff = ttk.Button(
+            steps, text="③ 生成对比日志（发给我们）",
+            command=self._on_diag_diff)
+        self.btn_diag_diff.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.var_diag_status = tk.StringVar(value="待操作")
+        self.lbl_diag_status = ttk.Label(
+            steps, textvariable=self.var_diag_status, style="Info.TLabel")
+        self.lbl_diag_status.pack(side=tk.LEFT, padx=(8, 0))
+
+        # --- 日志目录操作 ---
+        row2 = ttk.Frame(parent)
+        row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(row2, text="打开日志目录",
+                   command=self._open_diag_dir).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row2, text="复制对比日志路径",
+                   command=self._copy_diag_path).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(row2,
+                  text="（对比日志保存在 logs/状态取证/ 下，请把该文件发给我们）",
+                  foreground="gray").pack(side=tk.LEFT)
+
+        # --- 输出区 ---
+        out = ttk.LabelFrame(parent, text=" 结果 / 日志 ", padding=4)
+        out.pack(fill=tk.BOTH, expand=True)
+        out_inner = ttk.Frame(out)
+        out_inner.pack(fill=tk.BOTH, expand=True)
+        self.diag_text = tk.Text(
+            out_inner, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 11),
+        )
+        diag_sb = ttk.Scrollbar(out_inner, command=self.diag_text.yview)
+        self.diag_text.configure(yscrollcommand=diag_sb.set)
+        self.diag_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        diag_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (("ok", "#16a34a"), ("err", "#dc2626"),
+                           ("info", "#2563eb"), ("warn", "#d97706")):
+            self.diag_text.tag_configure(tag, foreground=color)
+
+        btnrow = ttk.Frame(out)
+        btnrow.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(btnrow, text="清空", command=self._clear_diag_log).pack(
+            side=tk.RIGHT)
+
+    def _diag_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.diag_text.configure(state=tk.NORMAL)
+            self.diag_text.insert(tk.END, line, tag)
+            self.diag_text.see(tk.END)
+            self.diag_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _clear_diag_log(self):
+        self.diag_text.configure(state=tk.NORMAL)
+        self.diag_text.delete("1.0", tk.END)
+        self.diag_text.configure(state=tk.DISABLED)
+
+    def _diag_use_hc_openid(self):
+        oid = self.var_hc_openid.get().strip()
+        if oid:
+            self.var_diag_openid.set(oid)
+            self._diag_log("已带入健康卡页 OpenID: %s" % oid[:20], "ok")
+        else:
+            messagebox.showinfo("提示", "健康卡确认页还没有 OpenID，请先去抓取")
+
+    def _on_diag_snapshot(self, phase: str):
+        if self._diag_busy:
+            return
+        openid = self.var_diag_openid.get().strip()
+        if not openid:
+            messagebox.showwarning("提示", "请先填入户主 OpenID")
+            return
+
+        label = "签约前" if phase == "before" else "签约后"
+        self._diag_busy = True
+        self.btn_diag_before.configure(state=tk.DISABLED)
+        self.btn_diag_after.configure(state=tk.DISABLED)
+        self.btn_diag_diff.configure(state=tk.DISABLED)
+        self.var_diag_status.set("正在抓取%s快照..." % label)
+        self.lbl_diag_status.configure(style="Info.TLabel")
+        self._diag_log("=== 开始抓取【%s】快照 (只读) ===" % label, "info")
+
+        def worker():
+            try:
+                client = HealthCardClient()
+                client._timeout = 30
+                ok, msg = client.connect(openid)
+                if not ok:
+                    self.after(0, lambda: self._diag_snapshot_done(
+                        phase, False, "连接失败: %s" % msg, ""))
+                    return
+                self._diag_log("已连接: %s" % msg, "ok")
+                snap = hc_diagnostics.capture_snapshot(
+                    client, raw=False,
+                    log=lambda m: self._diag_log(m, ""))
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(
+                    self._diag_base_dir(), "%s_%s.json" % (phase, ts))
+                hc_diagnostics.save_snapshot(snap, path)
+                n = len(snap.get("cards", []))
+                self.after(0, lambda: self._diag_snapshot_done(
+                    phase, True, "%s快照完成: %d 张卡" % (label, n), path))
+            except Exception as e:
+                self.after(0, lambda e=e: self._diag_snapshot_done(
+                    phase, False, "抓取异常: %s" % e, ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _diag_snapshot_done(self, phase, ok, msg, path):
+        self._diag_busy = False
+        self.btn_diag_before.configure(state=tk.NORMAL)
+        self.btn_diag_after.configure(state=tk.NORMAL)
+        self.btn_diag_diff.configure(state=tk.NORMAL)
+        self.var_diag_status.set(msg)
+        if ok:
+            self.lbl_diag_status.configure(style="Success.TLabel")
+            if phase == "before":
+                self._diag_before_path = path
+            else:
+                self._diag_after_path = path
+            self._diag_log("✓ %s" % msg, "ok")
+            self._diag_log("  已保存: %s" % path, "info")
+        else:
+            self.lbl_diag_status.configure(style="Error.TLabel")
+            self._diag_log("✗ %s" % msg, "err")
+
+    def _on_diag_diff(self):
+        if not self._diag_before_path or not os.path.exists(self._diag_before_path):
+            messagebox.showwarning("提示", "请先抓取【① 签约前快照】")
+            return
+        if not self._diag_after_path or not os.path.exists(self._diag_after_path):
+            messagebox.showwarning("提示", "请先抓取【② 签约后快照】")
+            return
+        try:
+            b = hc_diagnostics.load_snapshot(self._diag_before_path)
+            a = hc_diagnostics.load_snapshot(self._diag_after_path)
+            lines, summary = hc_diagnostics.diff_snapshots(b, a)
+        except Exception as e:
+            messagebox.showerror("错误", "生成对比失败: %s" % e)
+            return
+
+        report = "\n".join(lines)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(self._diag_base_dir(), "对比日志_%s.txt" % ts)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(report + "\n")
+            self._diag_last_report = path
+        except Exception as e:
+            self._diag_log("写日志文件失败: %s" % e, "err")
+
+        self._clear_diag_log()
+        self._diag_log("对比完成 — 新增卡 %d / 状态变化 %d / 其它变化 %d"
+                       % (summary["added_cards"], summary["status_changes"],
+                          summary["other_changes"]), "ok")
+        self.diag_text.configure(state=tk.NORMAL)
+        self.diag_text.insert(tk.END, "\n" + report + "\n")
+        self.diag_text.see("1.0")
+        self.diag_text.configure(state=tk.DISABLED)
+        self.var_diag_status.set("对比日志已生成，请发给我们")
+        self.lbl_diag_status.configure(style="Success.TLabel")
+        messagebox.showinfo(
+            "对比日志已生成",
+            "已保存到:\n%s\n\n请把这个文件发回给我们分析。" % path)
+
+    def _open_diag_dir(self):
+        d = self._diag_base_dir()
+        try:
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", d])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", d])
+        except Exception as e:
+            messagebox.showinfo("提示", "日志目录: %s\n(%s)" % (d, e))
+
+    def _copy_diag_path(self):
+        if self._diag_last_report and os.path.exists(self._diag_last_report):
+            self._copy_to_clipboard(self._diag_last_report)
+            self._diag_log("已复制对比日志路径: %s" % self._diag_last_report, "ok")
+        else:
+            messagebox.showinfo("提示", "还没有生成对比日志（请先点③）")
 
     # ================================================================
     # Tab 1: Login
