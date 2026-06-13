@@ -642,9 +642,11 @@ class GulfSignApp(tk.Tk):
         tab4 = ttk.Frame(self.notebook, padding=4)
         tab5 = ttk.Frame(self.notebook, padding=4)
         tab6 = ttk.Frame(self.notebook, padding=4)
+        tab7 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
+        self.notebook.add(tab7, text=" 居民申请确认 ")
         self.notebook.add(tab3, text=" 获取OpenID ")
         self.notebook.add(tab4, text=" 流量抓包 ")
         self.notebook.add(tab6, text=" 状态取证 ")
@@ -652,6 +654,7 @@ class GulfSignApp(tk.Tk):
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
+        self._build_signconfirm_tab(tab7)
         self._build_openid_tab(tab3)
         self._build_capture_tab(tab4)
         self._build_diag_tab(tab6)
@@ -2992,6 +2995,300 @@ class GulfSignApp(tk.Tk):
         self.hc_log_text.configure(state=tk.DISABLED)
 
     # ================================================================
+    # Tab 7: 居民申请确认 (居民申请6 → 医生确认 → 已签约) + 取证日志
+    # ================================================================
+
+    def _sc_base_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, "logs", "居民申请确认")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _build_signconfirm_tab(self, parent):
+        self._sc_logfile = None
+        self._sc_busy = False
+        self._sc_rows = {}
+
+        guide = ttk.LabelFrame(parent, text=" 说明 ", padding=8)
+        guide.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(guide, justify=tk.LEFT, foreground="#374151", text=(
+            "本页把居民端发起的【居民申请】用医生身份确认成【已签约】，并把全过程记成日志发回我们。\n"
+            "\n"
+            "用法：\n"
+            "  ① 先到「3.0系统签约」标签，账号登录 + 扫码，登录成功；\n"
+            "  ② 回到本页，点【① 刷新居民申请列表】，列出所有待确认的“居民申请”；\n"
+            "  ③ 选中一条点【② 确认选中】，或点【确认全部】；看状态是否变“已签约”；\n"
+            "  ④ 点【导出日志】，把 logs/居民申请确认/ 下的日志文件发给我们。\n"
+            "\n"
+            "说明：“居民申请”是居民端(健康卡/微信)发起的签约，医生确认后即“已签约”。"
+        )).pack(anchor=tk.W)
+
+        ctl = ttk.Frame(parent)
+        ctl.pack(fill=tk.X, pady=(0, 6))
+        self.btn_sc_refresh = ttk.Button(
+            ctl, text="① 刷新居民申请列表", command=self._on_sc_refresh)
+        self.btn_sc_refresh.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_sc_confirm_sel = ttk.Button(
+            ctl, text="② 确认选中 → 已签约", command=self._on_sc_confirm_selected)
+        self.btn_sc_confirm_sel.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_sc_confirm_all = ttk.Button(
+            ctl, text="确认全部", command=self._on_sc_confirm_all)
+        self.btn_sc_confirm_all.pack(side=tk.LEFT, padx=(0, 12))
+        self.var_sc_status = tk.StringVar(value="待操作")
+        ttk.Label(ctl, textvariable=self.var_sc_status,
+                  style="Info.TLabel").pack(side=tk.LEFT)
+
+        treef = ttk.LabelFrame(parent, text=" 居民申请（待确认） ", padding=4)
+        treef.pack(fill=tk.BOTH, expand=False, pady=(0, 6))
+        cols = ("name", "person_id", "contract", "status", "start")
+        self.sc_tree = ttk.Treeview(
+            treef, columns=cols, show="headings", height=8, selectmode="extended")
+        for cid, title, w in (
+            ("name", "姓名", 120), ("person_id", "PERSONID", 110),
+            ("contract", "合同号", 270), ("status", "状态", 90),
+            ("start", "起始", 100),
+        ):
+            self.sc_tree.heading(cid, text=title)
+            self.sc_tree.column(cid, width=w, anchor="w")
+        scb0 = ttk.Scrollbar(treef, command=self.sc_tree.yview)
+        self.sc_tree.configure(yscrollcommand=scb0.set)
+        self.sc_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scb0.pack(side=tk.RIGHT, fill=tk.Y)
+
+        row2 = ttk.Frame(parent)
+        row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(row2, text="导出日志（发给我们）",
+                   command=self._sc_export).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row2, text="打开日志目录",
+                   command=self._open_sc_dir).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(row2, text="（日志保存在 logs/居民申请确认/ 下）",
+                  foreground="gray").pack(side=tk.LEFT)
+
+        out = ttk.LabelFrame(parent, text=" 日志 ", padding=4)
+        out.pack(fill=tk.BOTH, expand=True)
+        inner = ttk.Frame(out)
+        inner.pack(fill=tk.BOTH, expand=True)
+        self.sc_text = tk.Text(
+            inner, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 11))
+        scb = ttk.Scrollbar(inner, command=self.sc_text.yview)
+        self.sc_text.configure(yscrollcommand=scb.set)
+        self.sc_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scb.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (("ok", "#16a34a"), ("err", "#dc2626"),
+                           ("info", "#2563eb"), ("warn", "#d97706")):
+            self.sc_text.tag_configure(tag, foreground=color)
+        ttk.Button(out, text="清空", command=self._sc_clear).pack(
+            side=tk.RIGHT, pady=(2, 0))
+
+    def _sc_clear(self):
+        self.sc_text.configure(state=tk.NORMAL)
+        self.sc_text.delete("1.0", tk.END)
+        self.sc_text.configure(state=tk.DISABLED)
+
+    def _sc_logpath(self) -> str:
+        if not getattr(self, "_sc_logfile", None):
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._sc_logfile = os.path.join(
+                self._sc_base_dir(), "居民申请确认_%s.log" % ts)
+        return self._sc_logfile
+
+    def _sc_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.sc_text.configure(state=tk.NORMAL)
+            self.sc_text.insert(tk.END, line, tag)
+            self.sc_text.see(tk.END)
+            self.sc_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+        try:
+            with open(self._sc_logpath(), "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _sc_check_login(self) -> bool:
+        if not getattr(self.client, "fully_authenticated", False):
+            self._sc_log("请先到「3.0系统签约」标签登录(扫码)成功后再操作。", "err")
+            messagebox.showwarning(
+                "未登录", "请先到「3.0系统签约」标签完成账号+扫码登录。")
+            return False
+        return True
+
+    def _on_sc_refresh(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        self._sc_busy = True
+        self.var_sc_status.set("查询中...")
+        threading.Thread(target=self._sc_refresh_worker, daemon=True).start()
+
+    def _sc_refresh_worker(self):
+        collected = []
+        try:
+            self._sc_log("=== 刷新居民申请列表 ===", "info")
+            seen = set()
+            oc = getattr(self.client, "org_code", "") or ""
+            org_candidates = [oc, ""] if oc else [""]
+            for ocx in org_candidates:
+                for page in range(1, 6):
+                    try:
+                        pts, total = self.client.query_patients(
+                            status="6", org_code=ocx, page=page)
+                    except Exception as e:
+                        self._sc_log("查询异常(机构=%s,第%d页): %s" % (
+                            ocx or "默认", page, e), "warn")
+                        break
+                    new_here = 0
+                    for p in pts:
+                        key = (p.person_id, p.contract_code)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        collected.append(p)
+                        new_here += 1
+                    self._sc_log("  机构=%s 第%d页: %d 条 (total=%s)" % (
+                        ocx or "默认", page, len(pts), total))
+                    if len(pts) < 1 or page * 20 >= int(total or 0):
+                        break
+                if collected:
+                    break
+            self.after(0, lambda: self._sc_fill_tree(collected))
+            self._sc_log("共 %d 条待确认居民申请。" % len(collected),
+                         "ok" if collected else "warn")
+        finally:
+            self._sc_busy = False
+            n = len(collected)
+            self.after(0, lambda: self.var_sc_status.set("列出 %d 条" % n))
+
+    def _sc_fill_tree(self, patients):
+        self.sc_tree.delete(*self.sc_tree.get_children())
+        self._sc_rows = {}
+        for p in patients:
+            iid = self.sc_tree.insert("", tk.END, values=(
+                p.name, p.person_id, p.contract_code,
+                p.status_text or "居民申请", p.agreement_start))
+            self._sc_rows[iid] = {
+                "person_id": p.person_id,
+                "contract": p.contract_code,
+                "name": p.name,
+            }
+
+    def _on_sc_confirm_selected(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        sel = self.sc_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表里选中要确认的居民申请。")
+            return
+        items = [self._sc_rows[i] for i in sel if i in self._sc_rows]
+        self._sc_start_confirm(items)
+
+    def _on_sc_confirm_all(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        items = list(self._sc_rows.values())
+        if not items:
+            messagebox.showinfo("提示", "列表为空，请先点【① 刷新居民申请列表】。")
+            return
+        if not messagebox.askyesno(
+            "确认", "将确认列表中的全部 %d 条居民申请，是否继续？" % len(items)):
+            return
+        self._sc_start_confirm(items)
+
+    def _sc_start_confirm(self, items):
+        self._sc_busy = True
+        self.var_sc_status.set("确认中...")
+        threading.Thread(
+            target=self._sc_confirm_worker, args=(items,), daemon=True).start()
+
+    def _sc_status_of(self, pid, cc):
+        try:
+            for r in self.client.list_personal_b0105(pid):
+                if r.get("contract_code") == cc:
+                    return r.get("status_text")
+        except Exception:
+            pass
+        return ""
+
+    def _sc_confirm_worker(self, items):
+        ok_n = 0
+        fail_n = 0
+        try:
+            self._sc_log("=== 开始确认 %d 条 ===" % len(items), "info")
+            for it in items:
+                pid = it["person_id"]
+                cc = it["contract"]
+                nm = it["name"]
+                self._sc_log("→ %s (PERSONID=%s) 合同=%s" % (nm, pid, cc))
+                try:
+                    r = self.client.confirm_signing(pid, cc, nm)
+                except Exception as e:
+                    fail_n += 1
+                    self._sc_log("   确认异常: %s" % e, "err")
+                    continue
+                time.sleep(0.6)
+                final = self._sc_status_of(pid, cc)
+                if final == "已签约" or (r.success and final in ("", "已签约")):
+                    ok_n += 1
+                    self._sc_log("   ✓ 已签约 (step=%s)" % r.step, "ok")
+                else:
+                    fail_n += 1
+                    self._sc_log("   ✗ 未成功: %s (当前状态: %s)" % (
+                        r.error or "确认失败", final or "未知"), "err")
+                time.sleep(0.3)
+            self._sc_log("=== 完成: 成功 %d, 失败 %d ===" % (ok_n, fail_n),
+                         "ok" if fail_n == 0 else "warn")
+        finally:
+            self._sc_busy = False
+            self.after(0, lambda: self.var_sc_status.set(
+                "完成: 成功%d 失败%d" % (ok_n, fail_n)))
+            self.after(800, self._on_sc_refresh)
+
+    def _sc_export(self):
+        path = self._sc_logpath()
+        try:
+            if not os.path.exists(path):
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write("")
+        except Exception:
+            pass
+        dst = filedialog.asksaveasfilename(
+            title="导出居民申请确认日志", defaultextension=".log",
+            initialfile=os.path.basename(path))
+        if not dst:
+            return
+        try:
+            import shutil
+            shutil.copyfile(path, dst)
+            messagebox.showinfo(
+                "已导出", "日志已导出:\n%s\n请把该文件发给我们。" % dst)
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
+
+    def _open_sc_dir(self):
+        d = self._sc_base_dir()
+        try:
+            if sys.platform == "darwin":
+                import subprocess
+                subprocess.run(["open", d])
+            elif sys.platform == "win32":
+                os.startfile(d)  # type: ignore[attr-defined]
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", d])
+        except Exception:
+            messagebox.showinfo("目录", d)
+
+    # ================================================================
     # Tab 6: 状态取证 (snapshot 前后对比, 只读)
     # ================================================================
 
@@ -3033,7 +3330,7 @@ class GulfSignApp(tk.Tk):
         ttk.Button(row, text="↙ 用健康卡页OpenID",
                    command=self._diag_use_hc_openid).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(row, text="去抓取OpenID",
-                   command=lambda: self.notebook.select(2)).pack(side=tk.LEFT)
+                   command=lambda: self.notebook.select(3)).pack(side=tk.LEFT)
 
         # --- 三个步骤按钮 ---
         steps = ttk.Frame(parent)

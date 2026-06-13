@@ -1754,6 +1754,7 @@ class PH3Client:
         agreement_end: str = "",
         period: str = "1",
         contact_phone: str = "",
+        applicant_status: str = "5",
     ) -> Tuple[bool, str, List[Dict]]:
         """批量发起家庭签约（``Do_B0105_Handler.ashx`` ``ACTION=10``）。
 
@@ -1769,6 +1770,9 @@ class PH3Client:
           person_ids: 人员 PERSONID 列表（同家庭/同批次）
           family_guid: 所属家庭档案 GUID（用于 JTID 字段）；可为空
           contact_phone: 服务电话（YSLXDH），服务端要求非空，否则提交失败
+          applicant_status: 写入 ``B0105_13`` 的状态值。默认 ``"5"``（医生申请）。
+            设为 ``"6"`` 时尝试以"居民申请"姿势落库——这是复现竞品
+            "申请→医生确认→已签约"链路的实验开关（服务端是否采信由实测决定）。
 
         返回：(success, message, created_contracts)
           created_contracts: 成功时回填每位居民对应的合同号 (PERSONID, contract_code)。
@@ -1833,7 +1837,7 @@ class PH3Client:
                 "B0105_06_GUID": fwb_ids,
                 "B0105_06": fwb_names,
                 "JTID": family_guid,
-                "B0105_13": "5",
+                "B0105_13": applicant_status,
                 "B0105_10": "0",
                 "B0105_11": "0",
                 "B0105_12": "0",
