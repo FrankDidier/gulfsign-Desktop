@@ -126,10 +126,16 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
+            if not isinstance(data, dict):
+                return False, "获取Token失败: 响应格式异常"
             if data.get("errno") != 0:
                 return False, "获取Token失败: %s" % data.get("message", "未知错误")
 
-            self.jwt_token = data["data"]["token"]
+            inner = data.get("data")
+            token = inner.get("token") if isinstance(inner, dict) else None
+            if not token:
+                return False, "获取Token失败: 响应缺少 token 字段"
+            self.jwt_token = token
             self.connected = True
 
             try:
@@ -164,12 +170,22 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
-            if data.get("errno") != 0:
-                logger.warning("获取卡列表失败: %s", data.get("message"))
+            if not isinstance(data, dict) or data.get("errno") != 0:
+                logger.warning(
+                    "获取卡列表失败: %s",
+                    data.get("message") if isinstance(data, dict) else "响应格式异常",
+                )
+                return []
+
+            raw_items = data.get("data", [])
+            if not isinstance(raw_items, list):
+                logger.warning("获取卡列表: data 字段非列表, 返回空")
                 return []
 
             cards = []
-            for item in data.get("data", []):
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
                 cards.append(HealthCard(
                     health_card_id=item.get("healthCardId", ""),
                     name=item.get("name", ""),
@@ -202,10 +218,17 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
+            if not isinstance(data, dict):
+                return False, "更新RPC失败: 响应格式异常"
             msg = data.get("message", "")
-            if "已完成" in msg:
+            errno = data.get("errno")
+            # 成功判定优先用平台统一的 errno==0; 仅当响应没有 errno 字段时,
+            # 才回退到 message 含"已完成"(防止把含 errno!=0 的错误响应误报成功).
+            if errno == 0:
+                return True, msg or "已完成"
+            if errno is None and "已完成" in msg:
                 return True, msg
-            return False, msg
+            return False, msg or "更新RPC失败"
         except Exception as e:
             return False, str(e)
 
@@ -224,8 +247,13 @@ class HealthCardClient:
                 timeout=self._timeout,
             )
             data = r.json()
-            if data.get("errno") == 0 and data.get("data"):
-                return data["data"][0]
+            if not isinstance(data, dict) or data.get("errno") != 0:
+                return None
+            inner = data.get("data")
+            if isinstance(inner, list) and inner:
+                return inner[0] if isinstance(inner[0], dict) else None
+            if isinstance(inner, dict):
+                return inner
             return None
         except Exception as e:
             logger.error("查询签约信息异常: %s", e)
@@ -322,14 +350,21 @@ class HealthCardClient:
             return info.get("GUID", "")
         return None
 
-    def query_teams(self, orgcode: str) -> List[dict]:
-        """List signing teams for an org via querygroup."""
+    def query_teams(self, orgcode: str, health_card_id: str = "") -> List[dict]:
+        """List signing teams for an org via querygroup.
+
+        平台要求带 ``healthCardId`` 授权上下文, 否则返回
+        ``errno=1 卡列表中未读取到信息``。
+        """
         if not self.connected:
             return []
         try:
+            params = {"action": "querygroup", "orgcode": orgcode}
+            if health_card_id:
+                params["healthCardId"] = health_card_id
             r = self.session.get(
                 self._jkxb_url(),
-                params={"action": "querygroup", "orgcode": orgcode},
+                params=params,
                 headers=self._jkxb_headers(),
                 timeout=self._timeout,
             )
@@ -342,9 +377,13 @@ class HealthCardClient:
             return []
 
     def query_service_packages(
-        self, orgcode: str, population_type: str = ""
+        self, orgcode: str, population_type: str = "", health_card_id: str = ""
     ) -> List[dict]:
-        """List service packages for an org via queryservicepackge."""
+        """List service packages for an org via queryservicepackge.
+
+        平台要求带 ``healthCardId`` 授权上下文, 否则返回
+        ``errno=1 卡列表中未读取到信息``。
+        """
         if not self.connected:
             return []
         try:
@@ -355,6 +394,8 @@ class HealthCardClient:
             }
             if population_type:
                 params["b0110_07"] = population_type
+            if health_card_id:
+                params["healthCardId"] = health_card_id
             r = self.session.get(
                 self._jkxb_url(), params=params,
                 headers=self._jkxb_headers(), timeout=self._timeout,
@@ -512,15 +553,16 @@ class HealthCardClient:
                 return False, "注册失败(Wechatcode可能已过期或人脸验证被拒)"
             if not body:
                 return False, "注册失败(空响应)"
+            # 修复: 之前 errno!=0 / 非 JSON 都被乐观当作 "提交成功", 误导 UI.
+            # 现在: 只接受明确的 errno==0 / success==True 作为成功.
             try:
                 data = json.loads(body)
-                if data.get("errno") == 0 or data.get("success"):
-                    return True, "健康卡注册成功"
-                return True, "注册已提交: %s" % body[:120]
             except json.JSONDecodeError:
-                if len(body) > 10:
-                    return True, "注册已提交(非JSON响应)"
-                return False, "注册失败: %s" % body[:120]
+                return False, "注册失败 (非JSON响应): %s" % body[:160]
+            if data.get("errno") == 0 or data.get("success") is True:
+                return True, "健康卡注册成功"
+            err = data.get("errmsg") or data.get("msg") or body[:160]
+            return False, "注册失败: %s" % err
         except Exception as e:
             return False, "注册异常: %s" % str(e)
 

@@ -9,9 +9,12 @@ import json
 import time
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Any
+import webbrowser
+import requests
+from urllib.parse import urljoin, quote
 
 if getattr(sys, "frozen", False):
     _bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
@@ -21,7 +24,7 @@ if getattr(sys, "frozen", False):
 from ph3_api import PH3Client, Patient, ProvinceMatch, SignResult, POPULATION_TYPES
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
 from sign_engine import (
-    SigningEngine, FullSignResult,
+    SigningEngine, FullSignResult, AgeBypassEligibility,
     get_age_from_id, needs_age_bypass,
     validate_id_card, generate_bypass_sfzh,
 )
@@ -33,7 +36,9 @@ from proxy_capture import (
 )
 from license_client import LicenseClient
 from config_manager import ConfigManager
-from batch_processor import BatchProcessor
+import hc_diagnostics
+from batch_processor import BatchProcessor, SuccessLogger, AgeBypassAuditLogger
+from qr_login_dialog import QRLoginDialog
 
 VERSION = "3.0.0"
 APP_TITLE = "湾流签约助手 v%s" % VERSION
@@ -314,8 +319,7 @@ class ProvinceLookupDialog(tk.Toplevel):
         self.btn_initiate.configure(state=state)
 
     def _on_search(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先在主界面登录 3.0 系统")
+        if not self.app._ensure_session_usable("查找"):
             return
         sfzh = self.var_sfzh.get().strip()
         xm = self.var_xm.get().strip()
@@ -522,6 +526,13 @@ class GulfSignApp(tk.Tk):
         self.license_client = LicenseClient()
         self.config_manager = ConfigManager()
         self.batch_processor = BatchProcessor()
+        # SuccessLogger 在每次签约结果回调里写入 logs/成功 与 logs/失败,
+        # 以前从未被生产路径调用过, 导致 "Excel 日志" 形同虚设。
+        try:
+            self.success_logger: Optional[SuccessLogger] = SuccessLogger()
+        except Exception as e:
+            print(f"[init] SuccessLogger 初始化失败 (Excel 日志将被禁用): {e}")
+            self.success_logger = None
         
         self.patients: List[Patient] = []
         self.selected_ids: set = set()
@@ -541,10 +552,19 @@ class GulfSignApp(tk.Tk):
 
         self._proxy: Optional[OpenIDProxy] = None
         self._proxy_running = False
+        self._captured_wechatcode: str = ""
 
         self._cap_proxy: Optional[OpenIDProxy] = None
         self._cap_running = False
         self._cap_request_count = 0
+        # 抓到的家医签约 POST 模板列表 (saved JSON paths, 最新在前)
+        self._sign_capture_records: list = []
+
+        # 状态取证 (snapshot 前后对比)
+        self._diag_before_path: str = ""
+        self._diag_after_path: str = ""
+        self._diag_last_report: str = ""
+        self._diag_busy = False
 
         self.capability_profile = {
             "mode": "unknown",
@@ -554,6 +574,30 @@ class GulfSignApp(tk.Tk):
             "status6_total": 0,
         }
         self._pending_export_after_batch = False
+
+        # 创建UI变量
+        self.var_url = tk.StringVar()
+        self.var_account = tk.StringVar()
+        self.var_password = tk.StringVar()
+        self.var_org = tk.StringVar()
+        self.var_doctor = tk.StringVar()
+        self.var_team = tk.StringVar()
+        self.var_delay = tk.StringVar()
+        self.var_pop_type = tk.StringVar()
+        self.var_agree_start = tk.StringVar()
+        self.var_agree_end = tk.StringVar()
+        self.var_max_count = tk.StringVar()
+        self.var_hc_openid = tk.StringVar()
+        self.var_hc_orgcode = tk.StringVar()
+        self.var_hc_team = tk.StringVar()
+        self.var_hc_doctor = tk.StringVar()
+        self.var_hc_start = tk.StringVar()
+        self.var_hc_end = tk.StringVar()
+        self.var_license_user = tk.StringVar()
+        self.var_license_password = tk.StringVar()
+        self.var_license_server = tk.StringVar()
+        self.var_max_workers = tk.StringVar()
+        self.var_batch_size = tk.StringVar()
 
         self._cfg = load_config()
 
@@ -597,17 +641,23 @@ class GulfSignApp(tk.Tk):
         tab3 = ttk.Frame(self.notebook, padding=4)
         tab4 = ttk.Frame(self.notebook, padding=4)
         tab5 = ttk.Frame(self.notebook, padding=4)
+        tab6 = ttk.Frame(self.notebook, padding=4)
+        tab7 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
+        self.notebook.add(tab7, text=" 居民申请确认 ")
         self.notebook.add(tab3, text=" 获取OpenID ")
         self.notebook.add(tab4, text=" 流量抓包 ")
+        self.notebook.add(tab6, text=" 状态取证 ")
         self.notebook.add(tab5, text=" 许可证配置 ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
+        self._build_signconfirm_tab(tab7)
         self._build_openid_tab(tab3)
         self._build_capture_tab(tab4)
+        self._build_diag_tab(tab6)
         self._build_license_tab(tab5)
 
     # ================================================================
@@ -622,39 +672,183 @@ class GulfSignApp(tk.Tk):
         self._build_log_section(parent)
 
     def _build_login_section(self, parent):
-        frame = ttk.LabelFrame(parent, text=" 系统登录 ", padding=6)
-        frame.pack(fill=tk.X, pady=(0, 4))
-
-        r0 = ttk.Frame(frame)
-        r0.pack(fill=tk.X)
-        ttk.Label(r0, text="系统地址:").pack(side=tk.LEFT)
-        self.var_url = tk.StringVar(value="https://ggws.hnhfpc.gov.cn")
-        ttk.Entry(r0, textvariable=self.var_url, width=48).pack(
-            side=tk.LEFT, padx=(4, 16)
+        """增强登录界面 - 解决客户反馈的连接问题"""
+        frame = ttk.LabelFrame(parent, text=" 系统登录与连接诊断 ", padding=10)
+        frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 创建UI组件
+        self._create_login_info_bar(frame)
+        self._create_login_diagnostic_area(frame)
+        self._create_login_options(frame)
+        self._create_login_status_bar(frame)
+        
+        # 初始诊断
+        self._run_login_initial_diagnosis()
+    
+    def _create_login_info_bar(self, parent):
+        """创建登录信息栏"""
+        info_frame = ttk.Frame(parent)
+        info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 系统地址
+        url_frame = ttk.Frame(info_frame)
+        url_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(url_frame, text="公卫3.0系统:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+        self.enhanced_url_var = tk.StringVar(value=self.client.base_url if hasattr(self.client, 'base_url') else "https://ggws.hnhfpc.gov.cn")
+        ttk.Label(url_frame, textvariable=self.enhanced_url_var, foreground="blue").pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 当前账号状态
+        account_frame = ttk.Frame(info_frame)
+        account_frame.pack(fill=tk.X)
+        
+        ttk.Label(account_frame, text="当前账号:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+        account = self._cfg.get("username", "未设置")
+        self.enhanced_account_var = tk.StringVar(value=account)
+        ttk.Label(account_frame, textvariable=self.enhanced_account_var, 
+                 foreground="green" if account else "red").pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 连接状态指示器
+        status_frame = ttk.Frame(info_frame)
+        status_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        ttk.Label(status_frame, text="连接状态:").pack(side=tk.LEFT)
+        self.enhanced_connection_status_var = tk.StringVar(value="待检测")
+        self.enhanced_connection_status_label = ttk.Label(
+            status_frame, 
+            textvariable=self.enhanced_connection_status_var,
+            font=("Arial", 10)
         )
-
-        ttk.Label(r0, text="账号:").pack(side=tk.LEFT)
-        self.var_account = tk.StringVar()
-        ttk.Entry(r0, textvariable=self.var_account, width=24).pack(
-            side=tk.LEFT, padx=(4, 16)
+        self.enhanced_connection_status_label.pack(side=tk.LEFT, padx=(5, 0))
+    
+    def _create_login_diagnostic_area(self, parent):
+        """创建登录诊断区域"""
+        diag_frame = ttk.LabelFrame(parent, text=" 连接诊断 ", padding=10)
+        diag_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 诊断结果显示
+        self.enhanced_diag_text = scrolledtext.ScrolledText(diag_frame, height=8, wrap=tk.WORD)
+        self.enhanced_diag_text.pack(fill=tk.X)
+        self.enhanced_diag_text.configure(state=tk.DISABLED)
+        
+        # 诊断按钮区域
+        button_frame = ttk.Frame(diag_frame)
+        button_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # 基础诊断按钮
+        self.enhanced_diagnose_btn = ttk.Button(
+            button_frame,
+            text="🔍 基础诊断",
+            command=self._run_login_diagnosis,
+            width=12
         )
-
-        ttk.Label(r0, text="密码:").pack(side=tk.LEFT)
-        self.var_password = tk.StringVar()
-        ttk.Entry(r0, textvariable=self.var_password, width=16, show="*").pack(
-            side=tk.LEFT, padx=(4, 16)
+        self.enhanced_diagnose_btn.pack(side=tk.LEFT)
+        
+        # 详细诊断按钮
+        self.enhanced_detailed_diagnose_btn = ttk.Button(
+            button_frame,
+            text="🔬 详细诊断",
+            command=self._run_detailed_diagnosis,
+            width=12
         )
-
-        self.btn_login = ttk.Button(r0, text="登 录", command=self._on_login)
-        self.btn_login.pack(side=tk.LEFT, padx=(8, 0))
-
-        r1 = ttk.Frame(frame)
-        r1.pack(fill=tk.X, pady=(4, 0))
-        self.var_login_status = tk.StringVar(value="未登录")
-        self.lbl_login_status = ttk.Label(
-            r1, textvariable=self.var_login_status, style="Info.TLabel"
+        self.enhanced_detailed_diagnose_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 同步配置按钮
+        self.enhanced_sync_btn = ttk.Button(
+            button_frame,
+            text="🔄 同步配置",
+            command=self._sync_login_configuration,
+            width=12,
+            state=tk.DISABLED
         )
-        self.lbl_login_status.pack(side=tk.LEFT)
+        self.enhanced_sync_btn.pack(side=tk.LEFT, padx=(10, 0))
+    
+    def _create_login_options(self, parent):
+        """创建登录选项"""
+        login_frame = ttk.LabelFrame(parent, text=" 登录方式 ", padding=10)
+        login_frame.pack(fill=tk.X)
+        
+        # 方式1: 网页跳转登录（推荐）
+        web_frame = ttk.Frame(login_frame)
+        web_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(web_frame, text="方式1: 网页跳转登录", font=("Arial", 11, "bold")).pack(anchor=tk.W)
+        ttk.Label(web_frame, text="直接打开公卫3.0系统登录页面，在浏览器中完成登录").pack(anchor=tk.W)
+        
+        web_button_frame = ttk.Frame(web_frame)
+        web_button_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.enhanced_web_login_btn = ttk.Button(
+            web_button_frame,
+            text="🌐 跳转到3.0系统登录",
+            command=self._open_web_login,
+            style="Accent.TButton",
+            width=20
+        )
+        self.enhanced_web_login_btn.pack(side=tk.LEFT)
+        
+        # 方式2: API直接登录
+        api_frame = ttk.Frame(login_frame)
+        api_frame.pack(fill=tk.X)
+        
+        ttk.Label(api_frame, text="方式2: API直接登录", font=("Arial", 11, "bold")).pack(anchor=tk.W)
+        ttk.Label(api_frame, text="使用现有账号密码直接登录（需要正确配置）").pack(anchor=tk.W)
+        
+        api_form_frame = ttk.Frame(api_frame)
+        api_form_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # 账号输入
+        row1 = ttk.Frame(api_form_frame)
+        row1.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(row1, text="账号:", width=8).pack(side=tk.LEFT)
+        self.enhanced_api_account_var = tk.StringVar(value=self._cfg.get("username", ""))
+        ttk.Entry(row1, textvariable=self.enhanced_api_account_var, width=25).pack(side=tk.LEFT)
+        
+        # 密码输入
+        row2 = ttk.Frame(api_form_frame)
+        row2.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(row2, text="密码:", width=8).pack(side=tk.LEFT)
+        self.enhanced_api_password_var = tk.StringVar()
+        ttk.Entry(row2, textvariable=self.enhanced_api_password_var, width=25, show="*").pack(side=tk.LEFT)
+        
+        # API登录按钮 + 扫码补登按钮 (并排)
+        api_btn_row = ttk.Frame(api_form_frame)
+        api_btn_row.pack(fill=tk.X)
+
+        self.enhanced_api_login_btn = ttk.Button(
+            api_btn_row,
+            text="API直接登录",
+            command=self._perform_api_login,
+            width=15
+        )
+        self.enhanced_api_login_btn.pack(side=tk.LEFT)
+
+        # 扫码补登: 适用场景 — API 登录已通过但需 2FA, 用户取消了第一次扫码
+        # 现在想补一次扫码; 也适合 API 登录失效后想重新扫码不再输密码.
+        self.enhanced_qr_login_btn = ttk.Button(
+            api_btn_row,
+            text="📱 扫码补登",
+            command=self._on_manual_qr_login,
+            width=12,
+        )
+        self.enhanced_qr_login_btn.pack(side=tk.LEFT, padx=(8, 0))
+    
+    def _create_login_status_bar(self, parent):
+        """创建登录状态栏"""
+        self.enhanced_status_var = tk.StringVar(value="就绪")
+        status_frame = ttk.Frame(parent)
+        status_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        status_label = ttk.Label(
+            status_frame,
+            textvariable=self.enhanced_status_var,
+            relief=tk.SUNKEN,
+            anchor=tk.W,
+            padding=(5, 2)
+        )
+        status_label.pack(fill=tk.X)
 
     def _build_query_section(self, parent):
         frame = ttk.LabelFrame(parent, text=" 查询条件 ", padding=6)
@@ -879,6 +1073,39 @@ class GulfSignApp(tk.Tk):
             r2, text="删除居民申请", variable=self.var_del_resident,
         ).pack(side=tk.LEFT, padx=(0, 12))
 
+        # 直签模板 — 高级 (默认 OFF)
+        r2b = ttk.Frame(frame)
+        r2b.pack(fill=tk.X, pady=(4, 0))
+
+        self.var_use_direct_sign = tk.BooleanVar(
+            value=bool(self._cfg.get("use_direct_sign", False))
+        )
+        ttk.Checkbutton(
+            r2b,
+            text="★ 使用直签模板 (高级 — 重放抓到的家医签约 POST)",
+            variable=self.var_use_direct_sign,
+            command=self._on_toggle_direct_sign,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.var_direct_sign_status = tk.StringVar(value="未设置模板")
+        ttk.Label(
+            r2b, textvariable=self.var_direct_sign_status,
+            foreground="gray",
+        ).pack(side=tk.LEFT)
+        self.after(80, self._refresh_direct_sign_status)
+
+        # 签约后校验真实状态 + 档案推进落库 (对标其它团队 checkSignStatus/updateDanganInfo)
+        r2c = ttk.Frame(frame)
+        r2c.pack(fill=tk.X, pady=(4, 0))
+        self.var_verify_finalize = tk.BooleanVar(
+            value=bool(self._cfg.get("verify_finalize", False))
+        )
+        ttk.Checkbutton(
+            r2c,
+            text="✔ 校验并推进到「已签约」(确认后回查真实状态, 仍停留在5/6则重提交档案落库)",
+            variable=self.var_verify_finalize,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
         r3 = ttk.Frame(frame)
         r3.pack(fill=tk.X, pady=(4, 0))
 
@@ -1085,8 +1312,7 @@ class GulfSignApp(tk.Tk):
 
     def _on_hc_sync_from_ph3(self):
         """Sync signing config from the logged-in 3.0 system."""
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先在「3.0系统签约」页面登录")
+        if not self._ensure_session_usable("从3.0同步配置"):
             return
 
         self.btn_hc_sync_from_ph3.configure(state=tk.DISABLED)
@@ -1257,6 +1483,101 @@ class GulfSignApp(tk.Tk):
             text="全自动: 绕过人脸 → 查询状态 → 创建合同(可选) → 确认签约  |  支持状态5(医生申请) + 状态6(居民申请) + 未签约",
             foreground="gray",
         ).pack(side=tk.LEFT)
+
+        # ----- 年龄绕行 (高级, 默认关闭) -----
+        # 服务端会拒绝对 "已实名认证 / 已面访" 居民的 SFZH 修改, 因此本功能
+        # 只对未实名 / 未面访的新建档居民有意义. 启用前请先用 "可行性预检".
+        r2 = ttk.LabelFrame(frame, text=" 年龄绕行 (高级) ", padding=4)
+        r2.pack(fill=tk.X, pady=(6, 0))
+
+        self.var_hc_age_bypass = tk.BooleanVar(
+            value=bool(self._cfg.get("enable_age_bypass", False))
+        )
+        ttk.Checkbutton(
+            r2,
+            text="启用年龄绕行 (对 18-60 岁居民临时改 SFZH 绕开人脸)",
+            variable=self.var_hc_age_bypass,
+            command=self._on_hc_age_bypass_toggle,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.var_hc_age_bypass_force = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            r2,
+            text="忽略预检阻断 (强制尝试)",
+            variable=self.var_hc_age_bypass_force,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_hc_age_precheck = ttk.Button(
+            r2, text="🔍 可行性预检 (导出Excel)",
+            command=self._on_hc_age_bypass_precheck,
+        )
+        self.btn_hc_age_precheck.pack(side=tk.RIGHT, padx=(8, 0))
+
+        ttk.Label(
+            r2,
+            text="(对所选居民只读探测; 已实名/已面访者通常会被服务端拒绝修改)",
+            foreground="gray",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+    def _on_toggle_direct_sign(self):
+        """3.0签约页: 切换「使用直签模板」时刷新状态条."""
+        self._refresh_direct_sign_status()
+        on = bool(self.var_use_direct_sign.get())
+        self._cfg["use_direct_sign"] = on
+        try:
+            save_config(self._cfg)
+        except Exception:
+            pass
+        if on:
+            tpl = self._load_direct_sign_template()
+            if tpl is None:
+                self._log(
+                    "⚠ 已勾选「使用直签模板」, 但未在 [流量抓包] 标签里设置模板. "
+                    "请先抓包并选定一个模板.", "warn",
+                )
+            else:
+                self._log(
+                    "★ 直签模板已就绪: ACTION=%s, 替换字段=%s" % (
+                        tpl.action or "?",
+                        ", ".join(tpl.likely_personid_fields()) or "(无)",
+                    ), "info",
+                )
+
+    def _refresh_direct_sign_status(self):
+        """更新 r2b 上「未设置模板/已加载」状态条."""
+        if not getattr(self, "var_direct_sign_status", None):
+            return
+        path = (self._cfg or {}).get("direct_sign_template_path", "")
+        if not path or not os.path.exists(path):
+            self.var_direct_sign_status.set("未设置模板 (去[流量抓包]标签抓取)")
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(path)
+            self.var_direct_sign_status.set(
+                "已加载: %s (ACTION=%s, %d 字段)" % (
+                    os.path.basename(path), tpl.action or "?", len(tpl.body_form),
+                )
+            )
+        except Exception as e:
+            self.var_direct_sign_status.set("模板加载失败: %s" % e)
+
+    def _on_hc_age_bypass_toggle(self):
+        """同步年龄绕行复选框状态到配置 + 警告."""
+        on = bool(self.var_hc_age_bypass.get())
+        self._cfg["enable_age_bypass"] = on
+        try:
+            self._save_current_config()
+        except Exception:
+            pass
+        if on:
+            self._hc_log(
+                "⚠ 年龄绕行已启用: 将对 18-60 岁居民尝试临时改 SFZH。请确保仅"
+                "用于未实名/未面访的新建档居民 — 已实名认证档案会被服务端拒绝。",
+                "warn",
+            )
+        else:
+            self._hc_log("年龄绕行已关闭", "info")
 
     def _build_hc_log(self, parent):
         frame = ttk.LabelFrame(parent, text=" 运行日志 ", padding=4)
@@ -1533,12 +1854,16 @@ class GulfSignApp(tk.Tk):
         def on_openid_found(openid):
             self.after(0, lambda oid=openid: self._on_openid_captured(oid))
 
+        def on_wechatcode_found(code):
+            self.after(0, lambda c=code: self._on_wechatcode_captured(c))
+
         def on_proxy_log(msg, tag=""):
             self._proxy_log(msg, tag)
 
         self._proxy = OpenIDProxy(
             port=port,
             on_openid=on_openid_found,
+            on_wechatcode=on_wechatcode_found,
             on_log=on_proxy_log,
         )
 
@@ -1602,6 +1927,18 @@ class GulfSignApp(tk.Tk):
         if openid not in items:
             self.openid_listbox.insert(tk.END, openid)
             self._proxy_log("已捕获 OpenID: %s" % openid, "ok")
+
+    def _on_wechatcode_captured(self, code: str):
+        """缓存抓包捕获的 Wechatcode — 供免人脸人群 (<18/>60) 自动绑卡使用。
+
+        同一 Wechatcode 可绑定一批 (最多 9 张) 健康卡; 仅本机内存保存, 不落盘。
+        """
+        if not code:
+            return
+        self._captured_wechatcode = code
+        self._proxy_log(
+            "★ 已捕获 Wechatcode (可用于免人脸人群自动绑卡): %s..." % code[:12], "ok"
+        )
 
     def _on_use_openid(self):
         sel = self.openid_listbox.curselection()
@@ -1704,6 +2041,7 @@ class GulfSignApp(tk.Tk):
         self._build_capture_guide(parent)
         self._build_capture_controls(parent)
         self._build_capture_stats(parent)
+        self._build_sign_captures_panel(parent)
         self._build_capture_log(parent)
 
     def _build_capture_guide(self, parent):
@@ -1711,18 +2049,20 @@ class GulfSignApp(tk.Tk):
         frame.pack(fill=tk.X, pady=(0, 4))
 
         guide_text = (
-            "流量抓包功能用于记录微信小程序与服务器之间的完整通信数据，\n"
-            "便于分析绑卡、解绑、人脸验证等关键接口的调用流程。\n"
+            "流量抓包: 抓两类有用的请求 — (A) 健康卡 OpenID, (B) 公卫3.0「家医签约」POST.\n"
             "\n"
-            "说明：日志里的「已记录」表示请求已被解密并写入日志，代理会照常转发，\n"
-            "不会故意阻断小程序；若页面一直转圈，再检查证书是否信任、是否已重启微信。\n"
+            "【家医签约抓包 — 用于直签】\n"
+            "  ① 点击「开始抓包」→ 自动安装证书 + 设置系统代理\n"
+            "  ② 浏览器打开 https://ggws.hnhfpc.gov.cn → 用账号密码登录\n"
+            "  ③ 找一位居民, 点击官方界面上的 [家医签约] 按钮 (走完弹窗确认)\n"
+            "  ④ 抓包器自动捕获该 POST → 落到 .dbg/sign_captures/sign_*.json\n"
+            "  ⑤ 在下面「已抓签约请求」里能看到, 点「设为直签模板」即可\n"
+            "  ⑥ 之后的批量签约可在 [3.0系统签约] 标签里勾选「使用直签模板」\n"
             "\n"
-            "操作步骤：\n"
-            "  ① 点击「开始抓包」→ 系统自动设置代理和证书\n"
-            "  ② 打开电脑版微信，进入目标小程序（如\"湖南省居民健康卡\"、\"我的健康卡\"等）\n"
-            "  ③ 在小程序中执行需要分析的操作（绑卡、解绑、查看家庭医生等）\n"
-            "  ④ 操作完成后点击「停止抓包」→ 点击「导出日志」保存文件\n"
-            "  ⑤ 将导出的日志文件发送给技术人员进行分析"
+            "【日志导出】\n"
+            "  「停止抓包」→「导出日志」可保存完整 traffic_log.txt (含所有解密请求)\n"
+            "\n"
+            "提示: 公卫3.0 服务器有速率/CSRF 校验, 直签时建议保持 0.3-1 秒间隔."
         )
 
         try:
@@ -1773,6 +2113,76 @@ class GulfSignApp(tk.Tk):
         ttk.Label(frame, textvariable=self.var_cap_stats, font=("", 10)).pack(
             side=tk.LEFT,
         )
+
+        ttk.Label(
+            frame, text="  |  ", foreground="gray",
+        ).pack(side=tk.LEFT)
+
+        self.var_sign_capture_count = tk.StringVar(value="家医签约模板: 0")
+        ttk.Label(
+            frame, textvariable=self.var_sign_capture_count,
+            font=("", 10, "bold"), foreground="#16a34a",
+        ).pack(side=tk.LEFT)
+
+    def _build_sign_captures_panel(self, parent):
+        """已抓签约请求面板 — 列出捕获的家医签约 POST 模板, 可设为直签模板."""
+        frame = ttk.LabelFrame(
+            parent, text=" 已抓签约请求 (家医签约 POST) ", padding=6,
+        )
+        frame.pack(fill=tk.X, pady=(0, 4))
+
+        cols = ("time", "action", "fields", "cid", "file")
+        self.sign_capture_tree = ttk.Treeview(
+            frame, columns=cols, show="headings", height=4, selectmode="browse",
+        )
+        self.sign_capture_tree.heading("time", text="抓取时间")
+        self.sign_capture_tree.heading("action", text="ACTION")
+        self.sign_capture_tree.heading("fields", text="字段数")
+        self.sign_capture_tree.heading("cid", text="居民ID (前4位)")
+        self.sign_capture_tree.heading("file", text="文件名")
+        self.sign_capture_tree.column("time", width=140, anchor="w")
+        self.sign_capture_tree.column("action", width=80, anchor="center")
+        self.sign_capture_tree.column("fields", width=60, anchor="center")
+        self.sign_capture_tree.column("cid", width=110, anchor="center")
+        self.sign_capture_tree.column("file", width=240, anchor="w")
+        self.sign_capture_tree.pack(fill=tk.X, side=tk.LEFT, expand=True)
+
+        sb = ttk.Scrollbar(
+            frame, orient=tk.VERTICAL, command=self.sign_capture_tree.yview,
+        )
+        self.sign_capture_tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_row = ttk.Frame(parent)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(
+            btn_row, text="刷新模板列表",
+            command=self._refresh_sign_captures,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="查看模板详情",
+            command=self._on_view_sign_capture,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="★ 设为直签模板 (供3.0签约页使用)",
+            command=self._on_use_sign_capture,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="打开抓包目录",
+            command=self._open_sign_capture_dir,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            btn_row, text="删除选中",
+            command=self._on_delete_sign_capture,
+        ).pack(side=tk.LEFT)
+
+        # 启动时刷新一下 — 用户可能保留了上次会话的模板
+        self.after(100, self._refresh_sign_captures)
 
     def _build_capture_log(self, parent):
         frame = ttk.LabelFrame(parent, text=" 实时抓包日志 ", padding=4)
@@ -1859,10 +2269,18 @@ class GulfSignApp(tk.Tk):
             else:
                 self._cap_log(msg, tag)
 
+        def on_sign_captured(record):
+            self.after(0, lambda r=record: self._on_sign_request_captured(r))
+
+        def on_wechatcode(code):
+            self.after(0, lambda c=code: self._on_wechatcode_captured(c))
+
         self._cap_proxy = OpenIDProxy(
             port=8888,
             on_openid=on_openid,
             on_log=on_log,
+            on_sign_captured=on_sign_captured,
+            on_wechatcode=on_wechatcode,
         )
 
         if self._cap_proxy.start():
@@ -1944,6 +2362,200 @@ class GulfSignApp(tk.Tk):
         except Exception as e:
             self._cap_log("导出失败: %s" % e, "err")
             messagebox.showerror("导出失败", str(e))
+
+    # -- Tab 4: Sign Capture (家医签约 抓包) --
+
+    def _refresh_sign_captures(self):
+        """重新扫描 .dbg/sign_captures/ 并刷新表格."""
+        from direct_sign import list_captures, SignTemplate, DEFAULT_CAPTURE_DIR
+
+        files = list_captures(DEFAULT_CAPTURE_DIR)
+
+        for iid in self.sign_capture_tree.get_children():
+            self.sign_capture_tree.delete(iid)
+
+        self._sign_capture_records = files
+
+        for fp in files:
+            try:
+                tpl = SignTemplate.from_capture(fp)
+            except Exception as e:
+                print("[sign-cap] skip bad capture %s: %s" % (fp, e))
+                continue
+            cid_short = (tpl.captured_person_id[:4] + "***") if tpl.captured_person_id else "—"
+            self.sign_capture_tree.insert(
+                "", tk.END, iid=fp,
+                values=(
+                    tpl.captured_at or "?",
+                    tpl.action or "?",
+                    str(len(tpl.body_form)),
+                    cid_short,
+                    os.path.basename(fp),
+                ),
+            )
+
+        self.var_sign_capture_count.set("家医签约模板: %d" % len(files))
+
+    def _on_sign_request_captured(self, record: dict):
+        """OpenIDProxy 在 main thread 里回调进来. 刷新列表 + 提示用户."""
+        path = record.get("_saved_to", "")
+        action = record.get("action", "?")
+        host = record.get("host", "?")
+        url_path = record.get("path", "?")
+        self._cap_log(
+            "📡 已捕获家医签约请求: %s%s (ACTION=%s)" % (host, url_path, action),
+            "ok",
+        )
+        self._cap_log(
+            "    文件: %s — 切到「已抓签约请求」面板, 点「设为直签模板」即可" %
+            (os.path.basename(path) if path else "?"),
+            "info",
+        )
+        self._refresh_sign_captures()
+
+    def _selected_sign_capture(self) -> Optional[str]:
+        sel = self.sign_capture_tree.selection()
+        if not sel:
+            messagebox.showinfo(
+                "提示", "请先在「已抓签约请求」表里选中一条记录"
+            )
+            return None
+        return sel[0]
+
+    def _on_view_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(fp)
+        except Exception as e:
+            messagebox.showerror("打开失败", "无法读取模板:\n%s" % e)
+            return
+
+        win = tk.Toplevel(self)
+        win.title("签约请求模板详情 — %s" % os.path.basename(fp))
+        win.geometry("780x520")
+
+        info = (
+            "Host: %s\n" % tpl.host +
+            "Path: %s\n" % tpl.path +
+            "ACTION: %s\n" % (tpl.action or "?") +
+            "抓取时间: %s\n" % (tpl.captured_at or "?") +
+            "字段总数: %d\n" % len(tpl.body_form) +
+            "识别到的居民ID字段: %s\n" % (
+                ", ".join(tpl.likely_personid_fields()) or "(无, 重放将不可用)"
+            ) +
+            "识别到的姓名字段: %s\n" % (
+                ", ".join(tpl.likely_name_fields()) or "(无)"
+            ) +
+            "captured_person_id: %s\n" % (tpl.captured_person_id or "—") +
+            "captured_name: %s\n" % (tpl.captured_name or "—") +
+            "\n--- body_form (replay 时按值替换 person_id) ---\n"
+        )
+        for k, v in tpl.body_form.items():
+            v_short = v if len(v) <= 80 else v[:77] + "..."
+            info += "  %-24s = %s\n" % (k, v_short)
+
+        info += (
+            "\n--- query ---\n" +
+            "\n".join("  %s = %s" % (k, v) for k, v in tpl.query.items())
+        )
+
+        txt = tk.Text(win, wrap=tk.NONE, font=("Menlo", 10))
+        sb_y = ttk.Scrollbar(win, orient=tk.VERTICAL, command=txt.yview)
+        sb_x = ttk.Scrollbar(win, orient=tk.HORIZONTAL, command=txt.xview)
+        txt.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side=tk.RIGHT, fill=tk.Y)
+        sb_x.pack(side=tk.BOTTOM, fill=tk.X)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.insert("1.0", info)
+        txt.configure(state=tk.DISABLED)
+
+    def _on_use_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        try:
+            from direct_sign import SignTemplate
+            tpl = SignTemplate.from_capture(fp)
+        except Exception as e:
+            messagebox.showerror("加载失败", "模板读取错误:\n%s" % e)
+            return
+
+        if not tpl.captured_person_id:
+            messagebox.showwarning(
+                "模板不可用",
+                "该模板里没识别出居民身份证或 GUID 字段, 重放时不知道替换哪个字段.\n"
+                "请重新抓一次明确包含 18 位身份证或 36 位 GUID 的请求.",
+            )
+            return
+
+        if not tpl.likely_personid_fields():
+            messagebox.showwarning(
+                "模板不可用", "未发现可替换的 person_id 字段."
+            )
+            return
+
+        self._active_sign_template_path = fp
+        # 把模板路径写进 config 让3.0签约页能读到
+        self._cfg["direct_sign_template_path"] = fp
+        try:
+            save_config(self._cfg)
+        except Exception as e:
+            print("[sign-cap] save direct_sign template path failed: %s" % e)
+
+        self._cap_log(
+            "★ 直签模板已设置: %s (ACTION=%s, person_id字段: %s)" % (
+                os.path.basename(fp), tpl.action or "?",
+                ", ".join(tpl.likely_personid_fields()),
+            ),
+            "ok",
+        )
+        # 同步刷新3.0签约页的状态条
+        try:
+            self._refresh_direct_sign_status()
+        except Exception:
+            pass
+        messagebox.showinfo(
+            "已设置直签模板",
+            "模板: %s\nACTION: %s\n字段数: %d\n替换字段: %s\n\n"
+            "下一步: 切到「3.0系统签约」标签, 勾选「使用直签模板」即可在批量\n"
+            "签约时使用该 POST 直接重放, 越过 STATUS=5/6 中间态." % (
+                os.path.basename(fp),
+                tpl.action or "?",
+                len(tpl.body_form),
+                ", ".join(tpl.likely_personid_fields()),
+            ),
+        )
+
+    def _open_sign_capture_dir(self):
+        from direct_sign import DEFAULT_CAPTURE_DIR
+        os.makedirs(DEFAULT_CAPTURE_DIR, exist_ok=True)
+        try:
+            if sys.platform == "darwin":
+                os.system("open '%s'" % DEFAULT_CAPTURE_DIR)
+            elif sys.platform == "win32":
+                os.startfile(DEFAULT_CAPTURE_DIR)  # type: ignore[attr-defined]
+            else:
+                os.system("xdg-open '%s'" % DEFAULT_CAPTURE_DIR)
+        except Exception as e:
+            messagebox.showerror("打开失败", str(e))
+
+    def _on_delete_sign_capture(self):
+        fp = self._selected_sign_capture()
+        if not fp:
+            return
+        if not messagebox.askyesno(
+            "确认删除", "删除模板文件:\n%s" % os.path.basename(fp),
+        ):
+            return
+        try:
+            os.remove(fp)
+            self._cap_log("已删除: %s" % os.path.basename(fp), "info")
+            self._refresh_sign_captures()
+        except Exception as e:
+            messagebox.showerror("删除失败", str(e))
 
     # ================================================================
     # Tab 5: License Configuration
@@ -2089,55 +2701,63 @@ class GulfSignApp(tk.Tk):
 
     def _on_license_verify(self):
         """验证许可证按钮点击事件"""
+        # Snapshot ALL Tk variables on the main thread before spawning the
+        # worker — `verify_license` returns a `LicenseResponse` dataclass,
+        # so the old `result["success"]` indexing always raised TypeError.
         username = self.var_license_user.get().strip()
         password = self.var_license_password.get().strip()
-        
+        server_url = self.var_license_server.get().strip()
+
         if not username or not password:
             self._license_log("请输入用户名和密码", "err")
             self.var_license_status.set("验证失败")
             self.lbl_license_status.configure(style="Error.TLabel")
             return
-        
+
         self._license_log(f"正在验证许可证: {username}", "info")
         self.var_license_status.set("验证中...")
         self.lbl_license_status.configure(style="Info.TLabel")
         self.btn_license_verify.configure(state=tk.DISABLED)
-        
+
         def verify_thread():
             try:
-                # 设置服务器地址
-                server_url = self.var_license_server.get().strip()
                 if server_url:
-                    # 更新配置中的服务器地址
                     self.license_client.config.server_url = server_url
-                
-                # 验证许可证
                 result = self.license_client.verify_license(username, password)
-                
-                if result["success"]:
-                    self.after(0, lambda: self._license_log(f"许可证验证成功: {result.get('message', '')}", "ok"))
-                    self.after(0, lambda: self.var_license_status.set("验证成功"))
-                    self.after(0, lambda: self.lbl_license_status.configure(style="Success.TLabel"))
-                    
-                    # 更新配置
-                    self._cfg["auth"] = {"user": username, "password": password}
-                    self._cfg["license_server_url"] = server_url
-                    save_config(self._cfg)
-                else:
-                    self.after(0, lambda: self._license_log(f"许可证验证失败: {result.get('message', '')}", "err"))
-                    self.after(0, lambda: self.var_license_status.set("验证失败"))
-                    self.after(0, lambda: self.lbl_license_status.configure(style="Error.TLabel"))
-                    
+                # LicenseResponse is a dataclass — use attribute access.
+                ok = bool(getattr(result, "success", False))
+                msg = getattr(result, "message", "") or ""
+                self._safe_after(lambda: self._license_verify_finish(
+                    ok, msg, username, password, server_url
+                ))
             except Exception as e:
-                self.after(0, lambda: self._license_log(f"验证过程中发生错误: {str(e)}", "err"))
-                self.after(0, lambda: self.var_license_status.set("验证失败"))
-                self.after(0, lambda: self.lbl_license_status.configure(style="Error.TLabel"))
-                
-            finally:
-                self.after(0, lambda: self.btn_license_verify.configure(state=tk.NORMAL))
-        
-        # 在新线程中执行验证
+                self._safe_after(lambda: self._license_verify_finish(
+                    False, f"验证过程中发生错误: {str(e)}",
+                    username, password, server_url,
+                ))
+
         threading.Thread(target=verify_thread, daemon=True).start()
+
+    def _license_verify_finish(self, ok: bool, msg: str,
+                               username: str, password: str,
+                               server_url: str):
+        """Main-thread continuation for license verification."""
+        self.btn_license_verify.configure(state=tk.NORMAL)
+        if ok:
+            self._license_log(f"许可证验证成功: {msg}", "ok")
+            self.var_license_status.set("验证成功")
+            self.lbl_license_status.configure(style="Success.TLabel")
+            self._cfg["auth"] = {"user": username, "password": password}
+            if server_url:
+                self._cfg["license_server_url"] = server_url
+            try:
+                save_config(self._cfg)
+            except Exception as e:
+                print(f"[license] save_config warning: {e}")
+        else:
+            self._license_log(f"许可证验证失败: {msg}", "err")
+            self.var_license_status.set("验证失败")
+            self.lbl_license_status.configure(style="Error.TLabel")
 
     def _on_save_license_config(self):
         """保存许可证配置按钮点击事件"""
@@ -2165,10 +2785,19 @@ class GulfSignApp(tk.Tk):
         c = self._cfg
         # 兼容新旧配置格式
         # 新格式使用 "username"，旧格式使用 "account"
+        username = ""
         if c.get("username"):
-            self.var_account.set(c["username"])
+            username = c["username"]
+            self.var_account.set(username)
         elif c.get("account"):
-            self.var_account.set(c["account"])
+            username = c["account"]
+            self.var_account.set(username)
+        
+        # 恢复密码字段
+        password = ""
+        if c.get("password"):
+            password = c["password"]
+            self.var_password.set(password)
         
         # 新格式使用 "ggws_base_url"，旧格式使用 "url"
         base_url = ""
@@ -2182,6 +2811,20 @@ class GulfSignApp(tk.Tk):
         # 设置PH3Client的base_url
         if base_url:
             self.client.base_url = base_url.rstrip("/")
+        
+        # 恢复增强登录界面的变量
+        if hasattr(self, 'enhanced_url_var'):
+            self.enhanced_url_var.set(base_url)
+        
+        if hasattr(self, 'enhanced_account_var'):
+            self.enhanced_account_var.set(username)
+        
+        if hasattr(self, 'enhanced_api_account_var'):
+            self.enhanced_api_account_var.set(username)
+        
+        # 恢复增强登录密码变量
+        if hasattr(self, 'enhanced_api_password_var') and password:
+            self.enhanced_api_password_var.set(password)
         
         if c.get("org_code"):
             self.var_org.set(c["org_code"])
@@ -2230,9 +2873,20 @@ class GulfSignApp(tk.Tk):
             self.var_batch_size.set(str(c["batch_size"]))
 
     def _save_current_config(self):
+        """Persist the current GUI state to disk.
+
+        Reading Tk variables (`StringVar.get()`) from a non-main thread is a
+        Tcl threading violation. If a worker accidentally calls us, hop back
+        to the main thread using ``after(0, ...)`` to do the actual read+save.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            self.after(0, self._save_current_config)
+            return
+
         config_data = {
             # 使用新格式字段名
             "username": self.var_account.get(),
+            "password": self.var_password.get(),
             "ggws_base_url": self.var_url.get(),
             # 其他字段
             "org_code": self.var_org.get(),
@@ -2249,8 +2903,20 @@ class GulfSignApp(tk.Tk):
             "hc_doctor": self.var_hc_doctor.get(),
             "hc_start": self.var_hc_start.get(),
             "hc_end": self.var_hc_end.get(),
+            "verify_finalize": bool(
+                getattr(self, "var_verify_finalize", None)
+                and self.var_verify_finalize.get()
+            ),
         }
-        
+
+        # 保留由 self._cfg 直接管理(非本函数 Tk 变量)的高级开关, 否则整文件覆盖会丢失
+        for _k in ("use_direct_sign", "direct_sign_template_path",
+                   "enable_age_bypass"):
+            if (self._cfg or {}).get(_k) is not None:
+                config_data[_k] = self._cfg[_k]
+        if getattr(self, "var_use_direct_sign", None) is not None:
+            config_data["use_direct_sign"] = bool(self.var_use_direct_sign.get())
+
         # 添加许可证配置
         license_user = self.var_license_user.get().strip()
         license_password = self.var_license_password.get().strip()
@@ -2329,6 +2995,547 @@ class GulfSignApp(tk.Tk):
         self.hc_log_text.configure(state=tk.DISABLED)
 
     # ================================================================
+    # Tab 7: 居民申请确认 (居民申请6 → 医生确认 → 已签约) + 取证日志
+    # ================================================================
+
+    def _sc_base_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, "logs", "居民申请确认")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _build_signconfirm_tab(self, parent):
+        self._sc_logfile = None
+        self._sc_busy = False
+        self._sc_rows = {}
+
+        guide = ttk.LabelFrame(parent, text=" 说明 ", padding=8)
+        guide.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(guide, justify=tk.LEFT, foreground="#374151", text=(
+            "本页把居民端发起的【居民申请】用医生身份确认成【已签约】，并把全过程记成日志发回我们。\n"
+            "\n"
+            "用法：\n"
+            "  ① 先到「3.0系统签约」标签，账号登录 + 扫码，登录成功；\n"
+            "  ② 回到本页，点【① 刷新居民申请列表】，列出所有待确认的“居民申请”；\n"
+            "  ③ 选中一条点【② 确认选中】，或点【确认全部】；看状态是否变“已签约”；\n"
+            "  ④ 点【导出日志】，把 logs/居民申请确认/ 下的日志文件发给我们。\n"
+            "\n"
+            "说明：“居民申请”是居民端(健康卡/微信)发起的签约，医生确认后即“已签约”。"
+        )).pack(anchor=tk.W)
+
+        ctl = ttk.Frame(parent)
+        ctl.pack(fill=tk.X, pady=(0, 6))
+        self.btn_sc_refresh = ttk.Button(
+            ctl, text="① 刷新居民申请列表", command=self._on_sc_refresh)
+        self.btn_sc_refresh.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_sc_confirm_sel = ttk.Button(
+            ctl, text="② 确认选中 → 已签约", command=self._on_sc_confirm_selected)
+        self.btn_sc_confirm_sel.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_sc_confirm_all = ttk.Button(
+            ctl, text="确认全部", command=self._on_sc_confirm_all)
+        self.btn_sc_confirm_all.pack(side=tk.LEFT, padx=(0, 12))
+        self.var_sc_status = tk.StringVar(value="待操作")
+        ttk.Label(ctl, textvariable=self.var_sc_status,
+                  style="Info.TLabel").pack(side=tk.LEFT)
+
+        treef = ttk.LabelFrame(parent, text=" 居民申请（待确认） ", padding=4)
+        treef.pack(fill=tk.BOTH, expand=False, pady=(0, 6))
+        cols = ("name", "person_id", "contract", "status", "start")
+        self.sc_tree = ttk.Treeview(
+            treef, columns=cols, show="headings", height=8, selectmode="extended")
+        for cid, title, w in (
+            ("name", "姓名", 120), ("person_id", "PERSONID", 110),
+            ("contract", "合同号", 270), ("status", "状态", 90),
+            ("start", "起始", 100),
+        ):
+            self.sc_tree.heading(cid, text=title)
+            self.sc_tree.column(cid, width=w, anchor="w")
+        scb0 = ttk.Scrollbar(treef, command=self.sc_tree.yview)
+        self.sc_tree.configure(yscrollcommand=scb0.set)
+        self.sc_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scb0.pack(side=tk.RIGHT, fill=tk.Y)
+
+        row2 = ttk.Frame(parent)
+        row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(row2, text="导出日志（发给我们）",
+                   command=self._sc_export).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row2, text="打开日志目录",
+                   command=self._open_sc_dir).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(row2, text="（日志保存在 logs/居民申请确认/ 下）",
+                  foreground="gray").pack(side=tk.LEFT)
+
+        out = ttk.LabelFrame(parent, text=" 日志 ", padding=4)
+        out.pack(fill=tk.BOTH, expand=True)
+        inner = ttk.Frame(out)
+        inner.pack(fill=tk.BOTH, expand=True)
+        self.sc_text = tk.Text(
+            inner, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 11))
+        scb = ttk.Scrollbar(inner, command=self.sc_text.yview)
+        self.sc_text.configure(yscrollcommand=scb.set)
+        self.sc_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scb.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (("ok", "#16a34a"), ("err", "#dc2626"),
+                           ("info", "#2563eb"), ("warn", "#d97706")):
+            self.sc_text.tag_configure(tag, foreground=color)
+        ttk.Button(out, text="清空", command=self._sc_clear).pack(
+            side=tk.RIGHT, pady=(2, 0))
+
+    def _sc_clear(self):
+        self.sc_text.configure(state=tk.NORMAL)
+        self.sc_text.delete("1.0", tk.END)
+        self.sc_text.configure(state=tk.DISABLED)
+
+    def _sc_logpath(self) -> str:
+        if not getattr(self, "_sc_logfile", None):
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._sc_logfile = os.path.join(
+                self._sc_base_dir(), "居民申请确认_%s.log" % ts)
+        return self._sc_logfile
+
+    def _sc_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.sc_text.configure(state=tk.NORMAL)
+            self.sc_text.insert(tk.END, line, tag)
+            self.sc_text.see(tk.END)
+            self.sc_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+        try:
+            with open(self._sc_logpath(), "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _sc_check_login(self) -> bool:
+        if not getattr(self.client, "fully_authenticated", False):
+            self._sc_log("请先到「3.0系统签约」标签登录(扫码)成功后再操作。", "err")
+            messagebox.showwarning(
+                "未登录", "请先到「3.0系统签约」标签完成账号+扫码登录。")
+            return False
+        return True
+
+    def _on_sc_refresh(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        self._sc_busy = True
+        self.var_sc_status.set("查询中...")
+        threading.Thread(target=self._sc_refresh_worker, daemon=True).start()
+
+    def _sc_refresh_worker(self):
+        collected = []
+        try:
+            self._sc_log("=== 刷新居民申请列表 ===", "info")
+            seen = set()
+            oc = getattr(self.client, "org_code", "") or ""
+            org_candidates = [oc, ""] if oc else [""]
+            for ocx in org_candidates:
+                for page in range(1, 6):
+                    try:
+                        pts, total = self.client.query_patients(
+                            status="6", org_code=ocx, page=page)
+                    except Exception as e:
+                        self._sc_log("查询异常(机构=%s,第%d页): %s" % (
+                            ocx or "默认", page, e), "warn")
+                        break
+                    new_here = 0
+                    for p in pts:
+                        key = (p.person_id, p.contract_code)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        collected.append(p)
+                        new_here += 1
+                    self._sc_log("  机构=%s 第%d页: %d 条 (total=%s)" % (
+                        ocx or "默认", page, len(pts), total))
+                    if len(pts) < 1 or page * 20 >= int(total or 0):
+                        break
+                if collected:
+                    break
+            self.after(0, lambda: self._sc_fill_tree(collected))
+            self._sc_log("共 %d 条待确认居民申请。" % len(collected),
+                         "ok" if collected else "warn")
+        finally:
+            self._sc_busy = False
+            n = len(collected)
+            self.after(0, lambda: self.var_sc_status.set("列出 %d 条" % n))
+
+    def _sc_fill_tree(self, patients):
+        self.sc_tree.delete(*self.sc_tree.get_children())
+        self._sc_rows = {}
+        for p in patients:
+            iid = self.sc_tree.insert("", tk.END, values=(
+                p.name, p.person_id, p.contract_code,
+                p.status_text or "居民申请", p.agreement_start))
+            self._sc_rows[iid] = {
+                "person_id": p.person_id,
+                "contract": p.contract_code,
+                "name": p.name,
+            }
+
+    def _on_sc_confirm_selected(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        sel = self.sc_tree.selection()
+        if not sel:
+            messagebox.showinfo("提示", "请先在列表里选中要确认的居民申请。")
+            return
+        items = [self._sc_rows[i] for i in sel if i in self._sc_rows]
+        self._sc_start_confirm(items)
+
+    def _on_sc_confirm_all(self):
+        if self._sc_busy or not self._sc_check_login():
+            return
+        items = list(self._sc_rows.values())
+        if not items:
+            messagebox.showinfo("提示", "列表为空，请先点【① 刷新居民申请列表】。")
+            return
+        if not messagebox.askyesno(
+            "确认", "将确认列表中的全部 %d 条居民申请，是否继续？" % len(items)):
+            return
+        self._sc_start_confirm(items)
+
+    def _sc_start_confirm(self, items):
+        self._sc_busy = True
+        self.var_sc_status.set("确认中...")
+        threading.Thread(
+            target=self._sc_confirm_worker, args=(items,), daemon=True).start()
+
+    def _sc_status_of(self, pid, cc):
+        try:
+            for r in self.client.list_personal_b0105(pid):
+                if r.get("contract_code") == cc:
+                    return r.get("status_text")
+        except Exception:
+            pass
+        return ""
+
+    def _sc_confirm_worker(self, items):
+        ok_n = 0
+        fail_n = 0
+        try:
+            self._sc_log("=== 开始确认 %d 条 ===" % len(items), "info")
+            for it in items:
+                pid = it["person_id"]
+                cc = it["contract"]
+                nm = it["name"]
+                self._sc_log("→ %s (PERSONID=%s) 合同=%s" % (nm, pid, cc))
+                try:
+                    r = self.client.confirm_signing(pid, cc, nm)
+                except Exception as e:
+                    fail_n += 1
+                    self._sc_log("   确认异常: %s" % e, "err")
+                    continue
+                time.sleep(0.6)
+                final = self._sc_status_of(pid, cc)
+                if final == "已签约" or (r.success and final in ("", "已签约")):
+                    ok_n += 1
+                    self._sc_log("   ✓ 已签约 (step=%s)" % r.step, "ok")
+                else:
+                    fail_n += 1
+                    self._sc_log("   ✗ 未成功: %s (当前状态: %s)" % (
+                        r.error or "确认失败", final or "未知"), "err")
+                time.sleep(0.3)
+            self._sc_log("=== 完成: 成功 %d, 失败 %d ===" % (ok_n, fail_n),
+                         "ok" if fail_n == 0 else "warn")
+        finally:
+            self._sc_busy = False
+            self.after(0, lambda: self.var_sc_status.set(
+                "完成: 成功%d 失败%d" % (ok_n, fail_n)))
+            self.after(800, self._on_sc_refresh)
+
+    def _sc_export(self):
+        path = self._sc_logpath()
+        try:
+            if not os.path.exists(path):
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write("")
+        except Exception:
+            pass
+        dst = filedialog.asksaveasfilename(
+            title="导出居民申请确认日志", defaultextension=".log",
+            initialfile=os.path.basename(path))
+        if not dst:
+            return
+        try:
+            import shutil
+            shutil.copyfile(path, dst)
+            messagebox.showinfo(
+                "已导出", "日志已导出:\n%s\n请把该文件发给我们。" % dst)
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
+
+    def _open_sc_dir(self):
+        d = self._sc_base_dir()
+        try:
+            if sys.platform == "darwin":
+                import subprocess
+                subprocess.run(["open", d])
+            elif sys.platform == "win32":
+                os.startfile(d)  # type: ignore[attr-defined]
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", d])
+        except Exception:
+            messagebox.showinfo("目录", d)
+
+    # ================================================================
+    # Tab 6: 状态取证 (snapshot 前后对比, 只读)
+    # ================================================================
+
+    def _diag_base_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, "logs", "状态取证")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _build_diag_tab(self, parent):
+        # --- 操作指引 ---
+        guide = ttk.LabelFrame(parent, text=" 操作指引（请按 ①②③ 顺序）", padding=8)
+        guide.pack(fill=tk.X, pady=(0, 8))
+
+        guide_text = (
+            "本页用于「取证」：把绑卡/签约前后的健康卡状态完整记录下来并对比，\n"
+            "生成一个日志文件发回给我们分析。全程只读，不会修改任何数据。\n"
+            "\n"
+            "如何获取 OpenID：到「获取OpenID」标签 → 启动代理 → 电脑版微信打开\n"
+            "小程序“我的健康卡” → 列表里会出现 OpenID → 选中点“★ 使用选中的OpenID”，\n"
+            "它会自动填到「健康卡确认」页；本页可点下方“↙ 用健康卡页OpenID”带入。\n"
+            "\n"
+            "步骤：① 先点【签约前快照】 → ② 去微信绑卡/让这几个人签约 →\n"
+            "      ③ 回来点【签约后快照】 → 再点【生成对比日志】 → 把日志发给我们。"
+        )
+        ttk.Label(guide, text=guide_text, justify=tk.LEFT,
+                  foreground="#374151").pack(anchor=tk.W)
+
+        # --- OpenID 输入 ---
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(row, text="户主 OpenID：", font=("", 10, "bold")).pack(side=tk.LEFT)
+        self.var_diag_openid = tk.StringVar(value=self.var_hc_openid.get())
+        ttk.Entry(row, textvariable=self.var_diag_openid, width=42).pack(
+            side=tk.LEFT, padx=(4, 8))
+        ttk.Button(row, text="↙ 用健康卡页OpenID",
+                   command=self._diag_use_hc_openid).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row, text="去抓取OpenID",
+                   command=lambda: self.notebook.select(3)).pack(side=tk.LEFT)
+
+        # --- 三个步骤按钮 ---
+        steps = ttk.Frame(parent)
+        steps.pack(fill=tk.X, pady=(0, 6))
+        self.btn_diag_before = ttk.Button(
+            steps, text="① 签约前快照 (BEFORE)",
+            command=lambda: self._on_diag_snapshot("before"))
+        self.btn_diag_before.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_diag_after = ttk.Button(
+            steps, text="② 签约后快照 (AFTER)",
+            command=lambda: self._on_diag_snapshot("after"))
+        self.btn_diag_after.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_diag_diff = ttk.Button(
+            steps, text="③ 生成对比日志（发给我们）",
+            command=self._on_diag_diff)
+        self.btn_diag_diff.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.var_diag_status = tk.StringVar(value="待操作")
+        self.lbl_diag_status = ttk.Label(
+            steps, textvariable=self.var_diag_status, style="Info.TLabel")
+        self.lbl_diag_status.pack(side=tk.LEFT, padx=(8, 0))
+
+        # --- 日志目录操作 ---
+        row2 = ttk.Frame(parent)
+        row2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(row2, text="打开日志目录",
+                   command=self._open_diag_dir).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row2, text="复制对比日志路径",
+                   command=self._copy_diag_path).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(row2,
+                  text="（对比日志保存在 logs/状态取证/ 下，请把该文件发给我们）",
+                  foreground="gray").pack(side=tk.LEFT)
+
+        # --- 输出区 ---
+        out = ttk.LabelFrame(parent, text=" 结果 / 日志 ", padding=4)
+        out.pack(fill=tk.BOTH, expand=True)
+        out_inner = ttk.Frame(out)
+        out_inner.pack(fill=tk.BOTH, expand=True)
+        self.diag_text = tk.Text(
+            out_inner, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 11),
+        )
+        diag_sb = ttk.Scrollbar(out_inner, command=self.diag_text.yview)
+        self.diag_text.configure(yscrollcommand=diag_sb.set)
+        self.diag_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        diag_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (("ok", "#16a34a"), ("err", "#dc2626"),
+                           ("info", "#2563eb"), ("warn", "#d97706")):
+            self.diag_text.tag_configure(tag, foreground=color)
+
+        btnrow = ttk.Frame(out)
+        btnrow.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(btnrow, text="清空", command=self._clear_diag_log).pack(
+            side=tk.RIGHT)
+
+    def _diag_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.diag_text.configure(state=tk.NORMAL)
+            self.diag_text.insert(tk.END, line, tag)
+            self.diag_text.see(tk.END)
+            self.diag_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _clear_diag_log(self):
+        self.diag_text.configure(state=tk.NORMAL)
+        self.diag_text.delete("1.0", tk.END)
+        self.diag_text.configure(state=tk.DISABLED)
+
+    def _diag_use_hc_openid(self):
+        oid = self.var_hc_openid.get().strip()
+        if oid:
+            self.var_diag_openid.set(oid)
+            self._diag_log("已带入健康卡页 OpenID: %s" % oid[:20], "ok")
+        else:
+            messagebox.showinfo("提示", "健康卡确认页还没有 OpenID，请先去抓取")
+
+    def _on_diag_snapshot(self, phase: str):
+        if self._diag_busy:
+            return
+        openid = self.var_diag_openid.get().strip()
+        if not openid:
+            messagebox.showwarning("提示", "请先填入户主 OpenID")
+            return
+
+        label = "签约前" if phase == "before" else "签约后"
+        self._diag_busy = True
+        self.btn_diag_before.configure(state=tk.DISABLED)
+        self.btn_diag_after.configure(state=tk.DISABLED)
+        self.btn_diag_diff.configure(state=tk.DISABLED)
+        self.var_diag_status.set("正在抓取%s快照..." % label)
+        self.lbl_diag_status.configure(style="Info.TLabel")
+        self._diag_log("=== 开始抓取【%s】快照 (只读) ===" % label, "info")
+
+        def worker():
+            try:
+                client = HealthCardClient()
+                client._timeout = 30
+                ok, msg = client.connect(openid)
+                if not ok:
+                    self.after(0, lambda: self._diag_snapshot_done(
+                        phase, False, "连接失败: %s" % msg, ""))
+                    return
+                self._diag_log("已连接: %s" % msg, "ok")
+                snap = hc_diagnostics.capture_snapshot(
+                    client, raw=False,
+                    log=lambda m: self._diag_log(m, ""))
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(
+                    self._diag_base_dir(), "%s_%s.json" % (phase, ts))
+                hc_diagnostics.save_snapshot(snap, path)
+                n = len(snap.get("cards", []))
+                self.after(0, lambda: self._diag_snapshot_done(
+                    phase, True, "%s快照完成: %d 张卡" % (label, n), path))
+            except Exception as e:
+                self.after(0, lambda e=e: self._diag_snapshot_done(
+                    phase, False, "抓取异常: %s" % e, ""))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _diag_snapshot_done(self, phase, ok, msg, path):
+        self._diag_busy = False
+        self.btn_diag_before.configure(state=tk.NORMAL)
+        self.btn_diag_after.configure(state=tk.NORMAL)
+        self.btn_diag_diff.configure(state=tk.NORMAL)
+        self.var_diag_status.set(msg)
+        if ok:
+            self.lbl_diag_status.configure(style="Success.TLabel")
+            if phase == "before":
+                self._diag_before_path = path
+            else:
+                self._diag_after_path = path
+            self._diag_log("✓ %s" % msg, "ok")
+            self._diag_log("  已保存: %s" % path, "info")
+        else:
+            self.lbl_diag_status.configure(style="Error.TLabel")
+            self._diag_log("✗ %s" % msg, "err")
+
+    def _on_diag_diff(self):
+        if not self._diag_before_path or not os.path.exists(self._diag_before_path):
+            messagebox.showwarning("提示", "请先抓取【① 签约前快照】")
+            return
+        if not self._diag_after_path or not os.path.exists(self._diag_after_path):
+            messagebox.showwarning("提示", "请先抓取【② 签约后快照】")
+            return
+        try:
+            b = hc_diagnostics.load_snapshot(self._diag_before_path)
+            a = hc_diagnostics.load_snapshot(self._diag_after_path)
+            lines, summary = hc_diagnostics.diff_snapshots(b, a)
+        except Exception as e:
+            messagebox.showerror("错误", "生成对比失败: %s" % e)
+            return
+
+        report = "\n".join(lines)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(self._diag_base_dir(), "对比日志_%s.txt" % ts)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(report + "\n")
+            self._diag_last_report = path
+        except Exception as e:
+            self._diag_log("写日志文件失败: %s" % e, "err")
+
+        self._clear_diag_log()
+        self._diag_log("对比完成 — 新增卡 %d / 状态变化 %d / 其它变化 %d"
+                       % (summary["added_cards"], summary["status_changes"],
+                          summary["other_changes"]), "ok")
+        self.diag_text.configure(state=tk.NORMAL)
+        self.diag_text.insert(tk.END, "\n" + report + "\n")
+        self.diag_text.see("1.0")
+        self.diag_text.configure(state=tk.DISABLED)
+        self.var_diag_status.set("对比日志已生成，请发给我们")
+        self.lbl_diag_status.configure(style="Success.TLabel")
+        messagebox.showinfo(
+            "对比日志已生成",
+            "已保存到:\n%s\n\n请把这个文件发回给我们分析。" % path)
+
+    def _open_diag_dir(self):
+        d = self._diag_base_dir()
+        try:
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", d])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", d])
+        except Exception as e:
+            messagebox.showinfo("提示", "日志目录: %s\n(%s)" % (d, e))
+
+    def _copy_diag_path(self):
+        if self._diag_last_report and os.path.exists(self._diag_last_report):
+            self._copy_to_clipboard(self._diag_last_report)
+            self._diag_log("已复制对比日志路径: %s" % self._diag_last_report, "ok")
+        else:
+            messagebox.showinfo("提示", "还没有生成对比日志（请先点③）")
+
+    # ================================================================
     # Tab 1: Login
     # ================================================================
 
@@ -2356,37 +3563,58 @@ class GulfSignApp(tk.Tk):
         self.btn_login.configure(state=tk.NORMAL)
         self.var_login_status.set(msg)
 
-        if ok:
-            self.lbl_login_status.configure(style="Success.TLabel")
-            self._log("✓ %s" % msg, "ok")
-
-            if self.client.org_code and not self.var_org.get():
-                self.var_org.set(self.client.org_code)
-            if self.client.doctor_name and not self.var_doctor.get():
-                self.var_doctor.set(self.client.doctor_name)
-            if self.client.team_name and not self.var_team.get():
-                self.var_team.set(self.client.team_name)
-
-            self._save_current_config()
-            self._start_capability_router_check()
-        else:
+        if not ok:
             self.lbl_login_status.configure(style="Error.TLabel")
             self._log("✗ %s" % msg, "err")
+            return
 
-    def _start_capability_router_check(self):
-        self.var_route_mode.set("能力路由: 检测中...")
+        # 服务器在 SSO 之外强制要求二维码扫描时, login() 也会返回 ok=True
+        # (因为 Token 已下发) — 这里必须显式区分, 否则后续会把半成品会话
+        # 当作完整登录, 触发查询/签约甚至能力探测.
+        if getattr(self.client, "qr_pending", False):
+            self.lbl_login_status.configure(style="Error.TLabel")
+            self._log("⚠ %s" % msg, "warn")
+            messagebox.showwarning(
+                "需要二维码验证",
+                "API 登录已下发 Token, 但服务器仍在等待二维码扫描.\n\n"
+                "请使用 [增强登录] 标签页中的 [跳转到3.0系统登录] 按钮,\n"
+                "在浏览器中完成扫码, 然后点 [同步配置]."
+            )
+            return
+
+        # 真·登录成功
+        self.lbl_login_status.configure(style="Success.TLabel")
+        self._log("✓ %s" % msg, "ok")
+
+        if self.client.org_code and not self.var_org.get():
+            self.var_org.set(self.client.org_code)
+        if self.client.doctor_name and not self.var_doctor.get():
+            self.var_doctor.set(self.client.doctor_name)
+        if self.client.team_name and not self.var_team.get():
+            self.var_team.set(self.client.team_name)
+
+        self._save_current_config()
+
+        # 安全模式: 只读探测 (统计 status 数量), 不再创建/确认测试合同。
+        # 创建-确认-删除流程曾经在每次登录时自动执行, 会在生产数据上留下
+        # 测试合同与签约记录, 已停用; 如需诊断接口请使用专用按钮 (TODO).
+        self._start_capability_router_check_readonly()
+
+    def _start_capability_router_check_readonly(self):
+        """只读版本能力路由探测: 仅统计 status 0/5/6 的数量,
+        绝不创建或修改任何居民数据。"""
+        self.var_route_mode.set("能力路由: 检测中... (只读)")
         self.lbl_route_mode.configure(style="RouteUnknown.TLabel")
-        self._log("能力路由检测: 开始（使用临时测试合同）", "info")
+        self._log("能力路由检测: 开始 (只读模式 — 不会写入生产)", "info")
 
         def worker():
             profile = {
-                "mode": "blocked",
-                "reason": "当前权限下未发现直生效通道",
+                "mode": "readonly",
+                "reason": "只读探测 — 已禁用产生测试合同的写入路径",
                 "status0_total": 0,
                 "status5_total": 0,
                 "status6_total": 0,
             }
-            temp_cc = ""
             try:
                 _, t0 = self.client.query_patients(status="0", page=1)
                 _, t5 = self.client.query_patients(status="5", page=1)
@@ -2394,44 +3622,15 @@ class GulfSignApp(tk.Tk):
                 profile["status0_total"] = t0
                 profile["status5_total"] = t5
                 profile["status6_total"] = t6
-
                 if t6 > 0:
                     profile["mode"] = "doctor_only"
-                    profile["reason"] = "可确认居民申请(6->0)，医生申请仍需外部通道"
-
-                pool, _ = self.client.query_patients(status="", page=1)
-                target = next((p for p in pool if not p.contract_code), None)
-                if target:
-                    r = self.client.initiate_signing(
-                        person_id=target.person_id,
-                        agreement_start="20260101",
-                        agreement_end="20261231",
-                        period="1",
-                    )
-                    if r.success and r.contract_code:
-                        temp_cc = r.contract_code
-                        r2 = self.client.confirm_signing(
-                            person_id=target.person_id,
-                            contract_code=r.contract_code,
-                            name=target.name,
-                        )
-                        if r2.success:
-                            profile["mode"] = "direct"
-                            profile["reason"] = "检测到医生申请可直接生效"
-                        else:
-                            if profile["mode"] == "blocked":
-                                profile["mode"] = "doctor_only"
-                            profile["reason"] = "医生申请不可直生效，建议接力包/高权限通道"
+                    profile["reason"] = "可确认居民申请(6->0); 直生效通道未在只读模式探测"
             except Exception as e:
                 profile["mode"] = "blocked"
-                profile["reason"] = "检测异常: %s" % str(e)
-            finally:
-                if temp_cc:
-                    try:
-                        self.client.delete_signing(temp_cc)
-                    except Exception:
-                        pass
-            self.after(0, lambda: self._finish_capability_router_check(profile))
+                profile["reason"] = "只读探测异常: %s" % str(e)
+            self._safe_after(
+                lambda: self._finish_capability_router_check(profile)
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2476,8 +3675,7 @@ class GulfSignApp(tk.Tk):
     def _on_family_batch_initiate(self):
         if self._signing:
             return
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_session_usable("家庭批量发起"):
             return
         if not self.patients:
             messagebox.showwarning("提示", "请先查询并选择居民")
@@ -2571,6 +3769,13 @@ class GulfSignApp(tk.Tk):
                     if self._stop_event.is_set():
                         break
                     pids = [m.person_id for m in batch]
+                    # 优先使用配置中真实的服务电话, 退回时仅以默认占位符作 fallback
+                    # (服务端拒绝空值, 但占位符会污染真实数据 — 由下层告警).
+                    contact_phone = (
+                        self._cfg.get("contact_phone", "")
+                        or self._cfg.get("yslxdh", "")
+                        or ""
+                    )
                     t_start = time.time()
                     ok, msg2, created = self.client.family_batch_initiate(
                         person_ids=pids,
@@ -2580,7 +3785,7 @@ class GulfSignApp(tk.Tk):
                         service_type=pop_code,
                         agreement_start=agree_start,
                         agreement_end=agree_end,
-                        contact_phone="13800000000",
+                        contact_phone=contact_phone,
                     )
                     elapsed = time.time() - t_start
                     code_map = {c["person_id"]: c for c in created}
@@ -2823,15 +4028,48 @@ class GulfSignApp(tk.Tk):
         return extra
 
     def _on_open_province_dialog(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录 3.0 系统")
+        if not self._ensure_session_usable("打开全省查找"):
             return
         dlg = ProvinceLookupDialog(self)
         dlg.grab_set()
 
+    def _ensure_session_usable(self, action: str = "操作") -> bool:
+        """Pre-flight check: session must be fully authenticated (not just
+        QR-pending). Pops a clear, actionable error and returns False
+        otherwise. ``action`` is woven into the message (e.g. "查询" / "签约").
+        """
+        if not getattr(self.client, "logged_in", False):
+            messagebox.showwarning("提示", f"请先登录公卫3.0系统再{action}")
+            return False
+        if getattr(self.client, "qr_pending", False):
+            messagebox.showwarning(
+                "需要二维码验证",
+                f"API 登录已下发 Token，但服务器仍在等待二维码扫描，"
+                f"无法{action}。\n\n"
+                "请按以下步骤操作：\n"
+                "  1. 点击 [跳转到3.0系统登录]，在浏览器中完成扫码\n"
+                "  2. 浏览器登录成功后回到本程序，点击 [同步配置]\n"
+                f"  3. 同步成功后再{action}",
+            )
+            return False
+        return True
+
+    def _ensure_can_query(self) -> bool:
+        """Pre-flight for 查询(首页) / 查询全部 — adds org_code check."""
+        if not self._ensure_session_usable("查询"):
+            return False
+        if not self.var_org.get().strip():
+            messagebox.showwarning(
+                "缺少机构代码",
+                "查询需要机构代码 (org_code)，但当前为空。\n\n"
+                "请先完成浏览器扫码登录后点 [同步配置] 自动获取，\n"
+                "或在 [机构代码] 字段中手动填入您所属医院的代码。",
+            )
+            return False
+        return True
+
     def _on_query(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_can_query():
             return
 
         self.btn_query.configure(state=tk.DISABLED)
@@ -2852,8 +4090,7 @@ class GulfSignApp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_query_all(self):
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_can_query():
             return
 
         self.btn_query.configure(state=tk.DISABLED)
@@ -2982,8 +4219,7 @@ class GulfSignApp(tk.Tk):
         if self._signing:
             return
 
-        if not self.client.logged_in:
-            messagebox.showwarning("提示", "请先登录")
+        if not self._ensure_session_usable("批量签约"):
             return
 
         targets = [p for p in self.patients if p.person_id in self.selected_ids]
@@ -3039,6 +4275,10 @@ class GulfSignApp(tk.Tk):
         auto_void = self.var_auto_void.get()
         del_doctor = self.var_del_doctor.get()
         del_resident = self.var_del_resident.get()
+        verify_finalize = bool(
+            getattr(self, "var_verify_finalize", None)
+            and self.var_verify_finalize.get()
+        )
 
         opts = []
         if auto_void:
@@ -3051,6 +4291,8 @@ class GulfSignApp(tk.Tk):
             opts.append("协议期: %s~%s" % (agree_start or "自动", agree_end or "自动"))
         if pop_code != "0":
             opts.append("人群: %s" % self.var_pop_type.get())
+        if verify_finalize:
+            opts.append("校验并推进落库")
         if opts:
             self._log("选项: %s" % ", ".join(opts), "info")
 
@@ -3063,6 +4305,7 @@ class GulfSignApp(tk.Tk):
             "auto_void": auto_void,
             "del_doctor": del_doctor,
             "del_resident": del_resident,
+            "verify_finalize": verify_finalize,
         }
 
         def worker():
@@ -3072,6 +4315,23 @@ class GulfSignApp(tk.Tk):
 
     def _batch_sign_worker(self, targets, delay, doctor, team, sign_opts=None):
         opts = sign_opts or {}
+
+        # 直签模板模式: 若用户已通过抓包设置了模板, 优先用它替换 sign_one
+        # — 这是为了复刻其它团队工具看到的 "STATUS=0 直接签约" 行为.
+        direct_template = None
+        if self._direct_sign_enabled():
+            direct_template = self._load_direct_sign_template()
+            if direct_template:
+                self.after(0, lambda t=direct_template: self._log(
+                    "★ 直签模式启用: 模板=%s, ACTION=%s" % (
+                        os.path.basename(t.source_file or ""), t.action or "?",
+                    ), "info",
+                ))
+            else:
+                self.after(0, lambda: self._log(
+                    "⚠ 已勾选「使用直签模板」但未找到模板, 退回普通签约模式", "warn",
+                ))
+
         for i, patient in enumerate(targets):
             if self._stop_event.is_set():
                 self.after(0, lambda: self._log("已手动停止", "warn"))
@@ -3091,21 +4351,43 @@ class GulfSignApp(tk.Tk):
                 ),
             )
 
-            result = self.client.sign_one(
-                person_id=patient.person_id,
-                name=patient.name,
-                team_name=team,
-                doctor_name=doctor,
-                delay=delay,
-                contract_status=patient.contract_status,
-                contract_code=patient.contract_code,
-                auto_void=opts.get("auto_void", False),
-                auto_delete_doctor=opts.get("del_doctor", False),
-                auto_delete_resident=opts.get("del_resident", False),
-                service_type=opts.get("pop_code", "0"),
-                agreement_start=opts.get("agree_start", ""),
-                agreement_end=opts.get("agree_end", ""),
-            )
+            if direct_template is not None:
+                ds_res = direct_template.replay_for(
+                    self.client,
+                    person_id=patient.person_id,
+                    name=patient.name,
+                )
+                # 转换 DirectSignResult → SignResult 兼容上游 _on_sign_result
+                from ph3_api import SignResult as _SR
+                result = _SR(
+                    success=ds_res.success,
+                    person_id=ds_res.person_id,
+                    name=ds_res.name,
+                    contract_code=ds_res.contract_code,
+                    error=ds_res.error,
+                    step="initiate" if ds_res.success else "initiate",
+                    elapsed=ds_res.elapsed,
+                )
+            else:
+                _vf = opts.get("verify_finalize", False)
+                result = self.client.sign_one(
+                    person_id=patient.person_id,
+                    name=patient.name,
+                    team_name=team,
+                    doctor_name=doctor,
+                    delay=delay,
+                    contract_status=patient.contract_status,
+                    contract_code=patient.contract_code,
+                    auto_void=opts.get("auto_void", False),
+                    auto_delete_doctor=opts.get("del_doctor", False),
+                    auto_delete_resident=opts.get("del_resident", False),
+                    service_type=opts.get("pop_code", "0"),
+                    agreement_start=opts.get("agree_start", ""),
+                    agreement_end=opts.get("agree_end", ""),
+                    sfzh=(patient.id_card or "").strip(),
+                    verify_final=_vf,
+                    finalize_archive=_vf,
+                )
 
             self.after(0, lambda r=result, idx=i: self._on_sign_result(r, idx))
 
@@ -3113,6 +4395,24 @@ class GulfSignApp(tk.Tk):
                 time.sleep(delay)
 
         self.after(0, self._signing_finished)
+
+    def _direct_sign_enabled(self) -> bool:
+        """当前是否启用直签模式 (UI 复选框 + 已设置模板路径)."""
+        if not getattr(self, "var_use_direct_sign", None):
+            return False
+        return bool(self.var_use_direct_sign.get())
+
+    def _load_direct_sign_template(self):
+        """从 config 读取 direct_sign_template_path 并加载, 失败返回 None."""
+        path = (self._cfg or {}).get("direct_sign_template_path", "")
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            from direct_sign import SignTemplate
+            return SignTemplate.from_capture(path)
+        except Exception as e:
+            print("[direct-sign] load template failed: %s" % e)
+            return None
 
     def _on_sign_result(self, result: SignResult, index: int):
         done = index + 1
@@ -3123,6 +4423,7 @@ class GulfSignApp(tk.Tk):
             self._sign_success += 1
             self._log("  ✓ %s 已签约 (%.1f秒)" % (label, result.elapsed), "ok")
             tag = "signed_ok"
+            self._log_sign_result(result, status="signed")
         elif result.success and result.step == "initiate":
             self._sign_success += 1
             self._log(
@@ -3130,6 +4431,7 @@ class GulfSignApp(tk.Tk):
                 "warn",
             )
             tag = "signed_ok"
+            self._log_sign_result(result, status="initiated_pending_confirm")
         else:
             self._sign_fail += 1
             step_label = {
@@ -3141,6 +4443,7 @@ class GulfSignApp(tk.Tk):
                 "err",
             )
             tag = "signed_fail"
+            self._log_sign_result(result, status="failed", step_label=step_label)
 
         if result.person_id in children:
             self.tree.item(result.person_id, tags=(tag,))
@@ -3155,6 +4458,50 @@ class GulfSignApp(tk.Tk):
                 self._sign_success, self._sign_fail, speed
             )
         )
+
+    def _log_sign_result(self, result: SignResult, status: str,
+                         step_label: str = ""):
+        """Persist one batch-sign outcome into the Excel logs.
+
+        Success and "initiated, pending confirm" go to logs/成功/...
+        Failures go to logs/失败/... so the "全面" reporting actually
+        contains both sides instead of dropping failures on the floor.
+        """
+        if not getattr(self, "success_logger", None):
+            return
+        account = (
+            self.var_account.get().strip()
+            or self._cfg.get("username", "")
+            or "unknown"
+        )
+        record = {
+            "person_id": result.person_id or "",
+            "name": result.name or "",
+            "contract_code": result.contract_code or "",
+            "step": result.step or "",
+            "status": status,
+            "elapsed": getattr(result, "elapsed", 0.0),
+            "doctor": self.var_doctor.get(),
+            "team": self.var_team.get(),
+            "org_code": self.var_org.get(),
+            "agree_start": self.var_agree_start.get(),
+            "agree_end": self.var_agree_end.get(),
+        }
+        try:
+            if status == "failed":
+                self.success_logger.log_failure(
+                    account=account,
+                    result_data=record,
+                    error=f"[{step_label}] {result.error or ''}",
+                )
+            else:
+                self.success_logger.log_success(
+                    account=account,
+                    result_data=record,
+                )
+        except Exception as e:
+            # Don't let logging failures break the signing flow.
+            print(f"[log_sign_result] swallowed: {e}")
 
     def _signing_finished(self):
         self._signing = False
@@ -3394,7 +4741,31 @@ class GulfSignApp(tk.Tk):
             "start_date": self.var_hc_start.get().strip(),
             "end_date": self.var_hc_end.get().strip(),
             "auto_create": auto_create,
+            "enable_age_bypass": bool(self.var_hc_age_bypass.get()),
+            "age_bypass_force": bool(self.var_hc_age_bypass_force.get()),
+            # PH3 登录密码: 用于全省个案查询的权威实名/面访标志位检测
+            "ph3_password": self._cfg.get("password", "") or self.var_password.get(),
         }
+
+        if sign_config["enable_age_bypass"]:
+            self._hc_log(
+                "年龄绕行: 已启用 (强制=%s) — 18-60 岁居民将临时改 SFZH" %
+                ("是" if sign_config["age_bypass_force"] else "否"),
+                "warn",
+            )
+            if not getattr(self.client, "fully_authenticated", False):
+                messagebox.showwarning(
+                    "提示",
+                    "年龄绕行需要先完整登录 3.0 系统 (含扫码认证)。\n\n"
+                    "请先在「登录」标签页完成登录与「同步配置」。",
+                )
+                self._hc_confirming = False
+                self.btn_hc_confirm.configure(state=tk.NORMAL)
+                self.btn_hc_stop.configure(state=tk.DISABLED)
+                self.btn_hc_connect.configure(state=tk.NORMAL)
+                if self.hc_client.connected:
+                    self.btn_hc_refresh.configure(state=tk.NORMAL)
+                return
 
         def worker():
             self._hc_confirm_worker(targets, sign_config)
@@ -3406,7 +4777,22 @@ class GulfSignApp(tk.Tk):
         fail = 0
         skipped = 0
         created = 0
+        bypass_blocked = 0
+        bypass_critical = 0
         t0 = time.time()
+
+        # 仅当用户启用年龄绕行时初始化审计 logger
+        audit_logger: Optional[AgeBypassAuditLogger] = None
+        if config.get("enable_age_bypass"):
+            try:
+                audit_logger = AgeBypassAuditLogger(
+                    account=self._cfg.get("username", "unknown")
+                )
+            except Exception as e:
+                self.after(0, lambda err=str(e): self._hc_log(
+                    "年龄绕行审计 logger 初始化失败: %s (将不写审计日志)" % err,
+                    "warn",
+                ))
 
         for i, card in enumerate(targets):
             if self._hc_stop.is_set():
@@ -3424,16 +4810,64 @@ class GulfSignApp(tk.Tk):
                 ),
             )
 
-            result = self.sign_engine.process_card_full(
-                card,
-                orgcode=config["orgcode"],
-                team_name=config.get("team_name", ""),
-                doctor_name=config.get("doctor_name", ""),
-                start_date=config.get("start_date", ""),
-                end_date=config.get("end_date", ""),
-                auto_create=config.get("auto_create", True),
-                log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+            use_bypass = (
+                config.get("enable_age_bypass", False)
+                and len(card.id_card or "") == 18
+                and needs_age_bypass(card.id_card)
             )
+
+            if use_bypass:
+                # 取得 PH3 person_id (B0101.GUID).
+                # 优先走全省个案查询 (用 SFZH + 密码) — 一次返回 person_id +
+                # 权威实名/面访标志位; 失败再 fallback 到本地机构内 query_patients.
+                person_id = self._resolve_ph3_person_id_by_sfzh(
+                    card.id_card,
+                    config.get("ph3_password", ""),
+                )
+                if not person_id:
+                    person_id = self._resolve_ph3_person_id(
+                        card.id_card, card.name
+                    )
+                if not person_id:
+                    self.after(
+                        0,
+                        lambda c=card: self._hc_log(
+                            "  ⊘ 未在 3.0 档案中找到 %s — 跳过年龄绕行, 走标准流程" % c.name,
+                            "warn",
+                        ),
+                    )
+                    use_bypass = False
+
+            if use_bypass:
+                result = self.sign_engine.process_card_with_age_bypass(
+                    card,
+                    person_id=person_id,
+                    orgcode=config["orgcode"],
+                    team_name=config.get("team_name", ""),
+                    doctor_name=config.get("doctor_name", ""),
+                    start_date=config.get("start_date", ""),
+                    end_date=config.get("end_date", ""),
+                    auto_create=config.get("auto_create", True),
+                    log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+                    audit_logger=audit_logger,
+                    force=bool(config.get("age_bypass_force", False)),
+                    province_password=config.get("ph3_password", ""),
+                )
+                if result.step == "age_bypass_blocked":
+                    bypass_blocked += 1
+                if result.step == "age_bypass_restore_failed":
+                    bypass_critical += 1
+            else:
+                result = self.sign_engine.process_card_full(
+                    card,
+                    orgcode=config["orgcode"],
+                    team_name=config.get("team_name", ""),
+                    doctor_name=config.get("doctor_name", ""),
+                    start_date=config.get("start_date", ""),
+                    end_date=config.get("end_date", ""),
+                    auto_create=config.get("auto_create", True),
+                    log_cb=lambda msg, tag="", _=None: self._hc_log(msg, tag),
+                )
 
             if result.step == "already_signed":
                 tag = "skipped"
@@ -3469,7 +4903,8 @@ class GulfSignApp(tk.Tk):
             self.after(0, _update_row)
             time.sleep(0.3)
 
-        def _done(s=success, f=fail, sk=skipped, cr=created):
+        def _done(s=success, f=fail, sk=skipped, cr=created,
+                  bb=bypass_blocked, bc=bypass_critical):
             self._hc_confirming = False
             self.btn_hc_confirm.configure(state=tk.NORMAL)
             self.btn_hc_stop.configure(state=tk.DISABLED)
@@ -3485,8 +4920,182 @@ class GulfSignApp(tk.Tk):
                 ),
                 "ok" if f == 0 else "warn",
             )
+            if bb or bc:
+                self._hc_log(
+                    "年龄绕行: 预检阻断 %d 人, 严重 (恢复失败) %d 人 — "
+                    "审计日志在 logs/年龄绕行/" % (bb, bc),
+                    "err" if bc else "warn",
+                )
+            if bc:
+                # 严重: 档案残留改过的 SFZH, 必须人工恢复
+                messagebox.showwarning(
+                    "严重: 档案恢复失败",
+                    "%d 个居民的 SFZH 已被修改但未能恢复!\n\n"
+                    "请立刻登录公卫3.0系统手动核对/恢复。\n"
+                    "审计日志: logs/年龄绕行/" % bc,
+                )
 
         self.after(0, _done)
+
+    def _resolve_ph3_person_id_by_sfzh(self, sfzh: str, password: str) -> str:
+        """通过全省个案查询拿 person_id (跨机构) — 优先路径, 一次拿权威标志."""
+        if not sfzh or len(sfzh) != 18 or not password:
+            return ""
+        if not getattr(self.client, "fully_authenticated", False):
+            return ""
+        try:
+            matches, _total, _err = self.client.query_province_wide(
+                sfzh=sfzh, password=password,
+            )
+            for m in matches:
+                if (m.id_card or "").strip() == sfzh and m.person_id:
+                    return m.person_id
+        except Exception:
+            pass
+        return ""
+
+    def _resolve_ph3_person_id(self, sfzh: str, name: str = "") -> str:
+        """通过 SFZH 反查 3.0 档案的 GUID (B0101.GUID).
+
+        在年龄绕行流程中, 我们需要 PH3 的 person_id 才能调 modify_archive.
+        实现: 调用 PH3 的全省个案查询 API (复用现有 ProvinceLookup 路径).
+
+        失败时返回空字符串 (调用方应回退到不绕行的标准流程).
+        """
+        if not sfzh or len(sfzh) != 18:
+            return ""
+        if not getattr(self.client, "fully_authenticated", False):
+            return ""
+        try:
+            # 机构内列表查询 (`query_patients` 通过 extra_filters 支持 SFZH 过滤)
+            # _DEFAULT_QUERY_FORM 里 SFZH 字段就是过滤键
+            patients, _total = self.client.query_patients(
+                page=1, extra_filters={"SFZH": sfzh},
+            )
+            for p in patients:
+                if (p.id_card or "").strip() == sfzh and p.person_id:
+                    return p.person_id
+        except Exception:
+            pass
+        return ""
+
+    def _on_hc_age_bypass_precheck(self):
+        """对当前选中的健康卡做只读年龄绕行可行性预检 + 导出 Excel."""
+        if not getattr(self.client, "fully_authenticated", False):
+            messagebox.showwarning(
+                "提示",
+                "可行性预检需要已完整登录 3.0 系统 (含扫码认证)。\n"
+                "请先在「登录」标签页完成登录与「同步配置」。",
+            )
+            return
+
+        targets = [c for c in self._hc_cards if c.health_card_id in self._hc_selected]
+        if not targets:
+            messagebox.showwarning("提示", "请先在表格中勾选要预检的健康卡")
+            return
+
+        candidates = [c for c in targets if needs_age_bypass(c.id_card or "")]
+        if not candidates:
+            messagebox.showinfo(
+                "提示",
+                "所选 %d 张卡均不在 18-60 岁范围, 不需要年龄绕行。" % len(targets),
+            )
+            return
+
+        if not messagebox.askyesno(
+            "确认预检",
+            "将对 %d 张 18-60 岁健康卡执行只读资格预检。\n\n"
+            "操作不会修改任何数据, 仅加载档案并导出 Excel 报告。\n"
+            "继续吗？" % len(candidates),
+        ):
+            return
+
+        self.btn_hc_age_precheck.configure(state=tk.DISABLED)
+        self._hc_log("=" * 50, "info")
+        self._hc_log("年龄绕行可行性预检: %d 人" % len(candidates), "info")
+
+        account = self._cfg.get("username", "unknown")
+        ph3_password = self._cfg.get("password", "") or self.var_password.get()
+
+        def worker():
+            try:
+                audit = AgeBypassAuditLogger(account=account)
+            except Exception as e:
+                self._safe_after(lambda err=str(e): self._hc_log(
+                    "审计 logger 初始化失败: %s" % err, "warn"
+                ))
+                audit = None
+
+            tlist = [
+                {"name": c.name, "sfzh": c.id_card,
+                 # 全省查询能用 SFZH 拿到 person_id, 因此本地反查可省略
+                 "person_id": ""}
+                for c in candidates
+            ]
+
+            def progress(i, total, e):
+                pid = e.person_id or "(未在3.0找到)"
+                tag = "ok" if e.likely_eligible else (
+                    "warn" if not e.error else "err"
+                )
+                self._safe_after(
+                    lambda i=i, total=total, n=e.name, p=pid,
+                    s=e.status, r=e.block_reason, er=e.error, t=tag:
+                    self._hc_log(
+                        "  [%d/%d] %s (%s) → %s%s" % (
+                            i, total, n or "?", p[:8] + "…" if p and p != "(未在3.0找到)" else p,
+                            s, ((" — " + (r or er)) if (r or er) else ""),
+                        ),
+                        t,
+                    )
+                )
+
+            results = self.sign_engine.batch_check_age_bypass_eligibility(
+                tlist, progress_cb=progress,
+                province_password=ph3_password,
+            )
+
+            export_path = ""
+            if audit:
+                try:
+                    export_path = audit.export_eligibility_report(results)
+                except Exception:
+                    export_path = ""
+
+            elig_count = sum(1 for r in results if r.likely_eligible and r.needs_bypass)
+            blocked_count = sum(
+                1 for r in results if not r.likely_eligible and r.needs_bypass
+            )
+            err_count = sum(1 for r in results if r.error)
+
+            def done():
+                self.btn_hc_age_precheck.configure(state=tk.NORMAL)
+                self._hc_log(
+                    "预检完成: 可绕行 %d, 预测被阻断 %d, 错误 %d" % (
+                        elig_count, blocked_count, err_count,
+                    ),
+                    "ok" if blocked_count == 0 and err_count == 0 else "warn",
+                )
+                if export_path:
+                    self._hc_log("Excel 报告: %s" % export_path, "info")
+                    if messagebox.askyesno(
+                        "预检完成",
+                        "已导出 Excel 报告:\n%s\n\n是否打开所在文件夹?" % export_path,
+                    ):
+                        try:
+                            folder = os.path.dirname(export_path)
+                            if sys.platform == "win32":
+                                os.startfile(folder)
+                            elif sys.platform == "darwin":
+                                os.system('open "%s"' % folder)
+                            else:
+                                os.system('xdg-open "%s"' % folder)
+                        except Exception:
+                            pass
+
+            self._safe_after(done)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_hc_stop(self):
         self._hc_stop.set()
@@ -3510,6 +5119,1020 @@ class GulfSignApp(tk.Tk):
             self._cap_proxy.stop()
         self._save_current_config()
         self.destroy()
+    
+    # ================================================================
+    # 增强登录功能方法
+    # ================================================================
+    
+    def _run_login_initial_diagnosis(self):
+        """运行初始诊断"""
+        self.enhanced_status_var.set("正在诊断连接状态...")
+        self.enhanced_diagnose_btn.configure(state=tk.DISABLED)
+        
+        # Capture Tk variables on main thread to avoid Tcl threading violations
+        snapshot = {
+            "base_url": self.enhanced_url_var.get(),
+            "account": self.enhanced_account_var.get(),
+        }
+
+        def worker():
+            diagnostics = self._perform_login_diagnosis(snapshot)
+            self._safe_after(
+                lambda: self._display_login_diagnostics(diagnostics)
+            )
+        
+        threading.Thread(target=worker, daemon=True).start()
+    
+    def _run_login_diagnosis(self):
+        """运行诊断"""
+        self._run_login_initial_diagnosis()
+    
+    def _run_detailed_diagnosis(self):
+        """运行详细诊断"""
+        self.enhanced_status_var.set("正在执行详细诊断...")
+        self.enhanced_diagnose_btn.configure(state=tk.DISABLED)
+        self.enhanced_detailed_diagnose_btn.configure(state=tk.DISABLED)
+        
+        # Capture Tk variables on main thread to avoid Tcl threading violations
+        snapshot = {
+            "base_url": self.enhanced_url_var.get(),
+            "account": self.enhanced_account_var.get(),
+        }
+
+        def worker():
+            diagnostics = self._perform_detailed_diagnosis(snapshot)
+            self._safe_after(
+                lambda: self._display_detailed_diagnostics(diagnostics)
+            )
+        
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _safe_after(self, callback):
+        """Schedule a callback on the Tk thread, but tolerate a destroyed
+        root window or a parent widget already torn down (this can happen
+        when a worker thread completes after the user closed the app)."""
+        try:
+            self.after(0, callback)
+        except (tk.TclError, RuntimeError):
+            pass
+    
+    def _check_login_status(self) -> Tuple[bool, str, str]:
+        """统一检查登录状态
+        
+        返回: (是否已登录(且可用), 状态消息, 详细信息)
+        
+        注意 "可用" 的语义: 仅当 PH3 会话完全通过 SSO + 二维码验证、
+        且已拿到机构代码时才返回 True。仅持有 Token 但卡在二维码 2FA 上
+        的会话在这里返回 False，避免误导用户去点 [查询]。
+        """
+        client = self.client
+        # QR-pending: token 已下发但服务器仍在等扫码，查询/签约都会失败。
+        if getattr(client, "qr_pending", False):
+            return (
+                False,
+                "登录不完整: 需要二维码验证",
+                "点 [📱 扫码补登] 在程序内直接扫码, 或 [跳转到3.0系统登录] 走浏览器",
+            )
+
+        # 完整登录 (logged_in 且 不是 qr_pending)
+        if getattr(client, "logged_in", False):
+            user_info = self._cfg.get("username", "未知用户")
+            org_info = self._cfg.get("org_name", "") or getattr(client, "org_name", "")
+            if org_info:
+                user_info = f"{user_info} ({org_info})"
+            # 即便 logged_in, 没有 org_code 也无法做查询/签约, 所以判为 "未就绪"
+            # (返回 False), 让上层 UI 不要把它当作可用会话.
+            if not (self._cfg.get("org_code") or getattr(client, "org_code", "")):
+                return (
+                    False,
+                    f"已登录但缺少机构信息: {user_info}",
+                    "请点击 [同步配置] 获取机构代码",
+                )
+            return True, f"已登录: {user_info}", "客户端状态有效"
+
+        # 仅检测到认证Cookie (例如手动浏览器登录后再打开App)
+        if hasattr(client, "session") and client.session and client.session.cookies:
+            auth_cookies = [
+                name for name in client.session.cookies.keys()
+                if any(k in name.lower()
+                       for k in ("auth", "token", "session", "login"))
+            ]
+            if auth_cookies:
+                return (
+                    False,
+                    "检测到认证Cookie但未确认登录",
+                    f"Cookie: {', '.join(auth_cookies[:2])}; 请点 [API直接登录] 或 [同步配置]",
+                )
+
+        # 配置中有机构代码: 上一次登录留下的, 但当前未连
+        if self._cfg.get("org_code"):
+            return (
+                False,
+                "未登录 (上次配置中保留有机构代码)",
+                "请点 [API直接登录] 或 [跳转到3.0系统登录]",
+            )
+
+        # 有账号但未点过登录按钮
+        if (hasattr(self, "enhanced_account_var") and
+                self.enhanced_account_var.get() and
+                hasattr(self, "enhanced_url_var") and
+                self.enhanced_url_var.get()):
+            return False, "有账号信息但未执行登录", "请点击API登录或网页登录按钮"
+        
+        return False, "未登录或会话已过期", "请使用API登录或网页登录"
+    
+    def _perform_login_diagnosis(
+        self, snapshot: Optional[Dict[str, str]] = None,
+    ) -> List[Tuple[str, bool, str]]:
+        """执行诊断 (snapshot 为主线程预先采集的 Tk 变量值，避免线程冲突)"""
+        snapshot = snapshot or {}
+        diagnostics = []
+        
+        # 1. 测试网络连接
+        try:
+            response = requests.get("https://www.baidu.com", timeout=5)
+            diagnostics.append(("网络连接", True, "网络连接正常"))
+        except Exception as e:
+            diagnostics.append(("网络连接", False, f"网络连接失败: {str(e)}"))
+        
+        # 2. 测试公卫3.0系统 - 使用多种SSL/TLS配置和SSO重定向处理
+        base_url = snapshot.get("base_url", "") or self._cfg.get("ggws_base_url", "")
+        if not base_url:
+            diagnostics.append(("公卫3.0系统", False, "系统地址为空"))
+            diagnostics.append(("配置完整性", False, "缺失: 3.0系统地址"))
+            diagnostics.append(("登录状态", False, "未登录"))
+            return diagnostics
+        
+        # 尝试多种SSL/TLS配置
+        connection_success = False
+        connection_error = ""
+        redirect_info = ""
+        
+        # 配置1: 使用自定义SSL适配器处理SSO重定向（访问FormMain.aspx）
+        try:
+            import ssl
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.ssl_ import create_urllib3_context
+            
+            class CustomSSLAdapter(HTTPAdapter):
+                """自定义SSL适配器，支持较旧的TLS版本和SSO重定向"""
+                def init_poolmanager(self, *args, **kwargs):
+                    ctx = create_urllib3_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+                    kwargs['ssl_context'] = ctx
+                    return super().init_poolmanager(*args, **kwargs)
+            
+            session = requests.Session()
+            session.mount("https://", CustomSSLAdapter())
+            session.verify = False
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            
+            # 尝试访问FormMain.aspx（这会触发SSO重定向）
+            test_url = f"{base_url.rstrip('/')}/FormMain.aspx"
+            response = session.get(test_url, timeout=15, allow_redirects=True)
+            
+            if response.status_code == 200:
+                # 检查是否成功访问系统
+                is_ggws = "ggws" in response.text.lower() or "公卫" in response.text or "湖南省基层卫生信息系统" in response.text
+                has_token = "Token" in response.url or "token" in response.url.lower()
+                
+                if is_ggws or has_token:
+                    diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (支持SSO重定向)"))
+                    connection_success = True
+                    
+                    # 检查是否有Token（SSO认证成功）
+                    if has_token:
+                        diagnostics.append(("SSO认证", True, "检测到认证Token"))
+                    else:
+                        diagnostics.append(("SSO认证", False, "未检测到认证Token，可能需要登录"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+            else:
+                diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+                
+            # 检查重定向链
+            if response.history:
+                redirect_count = len(response.history)
+                redirect_info = f"处理了 {redirect_count} 次重定向"
+                diagnostics.append(("重定向处理", True, redirect_info))
+                
+                # 检查是否重定向到SSO服务器
+                sso_redirect = any("sso.hnhfpc.gov.cn" in resp.url for resp in response.history)
+                if sso_redirect:
+                    diagnostics.append(("SSO重定向", True, "检测到SSO认证流程"))
+                    
+        except requests.exceptions.TooManyRedirects as e:
+            connection_error = f"重定向过多: {str(e)}"
+            diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
+        except Exception as e:
+            connection_error = f"SSO重定向处理失败: {str(e)}"
+        
+        # 配置2: 标准HTTPS连接（备用）
+        if not connection_success:
+            try:
+                response = requests.get(base_url, timeout=10, verify=True)
+                if response.status_code == 200:
+                    if "ggws" in response.text.lower() or "公卫" in response.text:
+                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (标准HTTPS)"))
+                        connection_success = True
+                    else:
+                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+            except Exception as e:
+                connection_error = f"标准HTTPS失败: {str(e)}"
+        
+        # 配置3: 跳过证书验证（备用）
+        if not connection_success:
+            try:
+                response = requests.get(base_url, timeout=10, verify=False)
+                if response.status_code == 200:
+                    if "ggws" in response.text.lower() or "公卫" in response.text:
+                        diagnostics.append(("公卫3.0系统", True, "系统可正常访问 (跳过证书验证)"))
+                        connection_success = True
+                    else:
+                        diagnostics.append(("公卫3.0系统", False, "未检测到公卫系统特征"))
+                else:
+                    diagnostics.append(("公卫3.0系统", False, f"HTTP状态码: {response.status_code}"))
+            except Exception as e:
+                connection_error = f"跳过证书验证失败: {str(e)}"
+        
+        # 如果所有配置都失败
+        if not connection_success and not connection_error.startswith("重定向过多"):
+            diagnostics.append(("公卫3.0系统", False, f"访问失败: {connection_error}"))
+        
+        # 3. 检查配置
+        missing = []
+        
+        # 检查账号
+        account = self._cfg.get("username")
+        if not account:
+            missing.append("账号")
+        
+        # 检查系统地址
+        base_url = self._cfg.get("ggws_base_url")
+        if not base_url:
+            missing.append("3.0系统地址")
+        
+        # 检查密码（如果账号存在但密码为空）
+        password = self._cfg.get("password")
+        if account and not password:
+            # 密码可以为空，但需要提示用户
+            diagnostics.append(("密码配置", False, "密码为空，请确保已输入密码"))
+        
+        # 检查机构代码（如果已登录但机构代码为空）
+        org_code = self._cfg.get("org_code")
+        if hasattr(self.client, 'logged_in') and self.client.logged_in and not org_code:
+            # 尝试从客户端获取机构代码
+            if hasattr(self.client, 'org_code') and self.client.org_code:
+                self._cfg["org_code"] = self.client.org_code
+                self._save_current_config()
+                org_code = self.client.org_code
+            
+            if not org_code:
+                diagnostics.append(("机构信息", False, "机构代码未提取，请尝试同步配置"))
+        
+        if missing:
+            diagnostics.append(("配置完整性", False, f"缺失: {', '.join(missing)}"))
+        else:
+            # 如果有警告信息但主要配置完整，仍然显示配置完整
+            diagnostics.append(("配置完整性", True, "配置完整"))
+        
+        # 4. 检查登录状态 - 使用统一的检测函数
+        login_detected, login_message, login_details = self._check_login_status()
+        diagnostics.append(("登录状态", login_detected, login_message))
+        
+        return diagnostics
+    
+    def _display_login_diagnostics(self, diagnostics: List[Tuple[str, bool, str]]):
+        """显示诊断结果"""
+        self.enhanced_diag_text.configure(state=tk.NORMAL)
+        self.enhanced_diag_text.delete(1.0, tk.END)
+        
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.enhanced_diag_text.insert(tk.END, f"诊断时间: {current_time}\n")
+        self.enhanced_diag_text.insert(tk.END, "="*50 + "\n\n")
+        
+        all_passed = True
+        
+        for name, success, message in diagnostics:
+            icon = "✅" if success else "❌"
+            tag = "success" if success else "error"
+            
+            if not success:
+                all_passed = False
+            
+            self.enhanced_diag_text.insert(tk.END, f"{icon} {name}: ")
+            self.enhanced_diag_text.insert(tk.END, f"{message}\n", tag)
+        
+        # 配置标签样式
+        self.enhanced_diag_text.tag_config("success", foreground="green")
+        self.enhanced_diag_text.tag_config("error", foreground="red")
+        
+        self.enhanced_diag_text.configure(state=tk.DISABLED)
+        self.enhanced_diagnose_btn.configure(state=tk.NORMAL)
+        
+        if all_passed:
+            self.enhanced_status_var.set("诊断完成: 所有测试通过")
+            self.enhanced_connection_status_var.set("已连接")
+            self.enhanced_connection_status_label.configure(foreground="green")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        else:
+            self.enhanced_status_var.set("诊断完成: 发现一些问题")
+            self.enhanced_connection_status_var.set("连接异常")
+            self.enhanced_connection_status_label.configure(foreground="red")
+    
+    def _perform_detailed_diagnosis(
+        self, snapshot: Optional[Dict[str, str]] = None,
+    ) -> List[Tuple[str, bool, str, str]]:
+        """执行详细诊断 (snapshot 为主线程预先采集的 Tk 变量值，避免线程冲突)"""
+        snapshot = snapshot or {}
+        diagnostics = []
+        
+        # 1. 测试网络连接
+        try:
+            import socket
+            start_time = time.time()
+            socket.create_connection(("www.baidu.com", 443), timeout=5)
+            response_time = int((time.time() - start_time) * 1000)
+            diagnostics.append(("网络连接", True, f"连接正常 (响应时间: {response_time}ms)", ""))
+        except Exception as e:
+            diagnostics.append(("网络连接", False, f"连接失败", str(e)))
+        
+        # 2. 测试DNS解析
+        try:
+            import socket
+            start_time = time.time()
+            socket.gethostbyname("ggws.hnhfpc.gov.cn")
+            dns_time = int((time.time() - start_time) * 1000)
+            diagnostics.append(("DNS解析", True, f"解析成功 (耗时: {dns_time}ms)", ""))
+        except Exception as e:
+            diagnostics.append(("DNS解析", False, f"解析失败", str(e)))
+        
+        # 3. 测试公卫3.0系统连接
+        base_url = snapshot.get("base_url", "") or self._cfg.get("ggws_base_url", "")
+        if not base_url:
+            diagnostics.append(("系统连接", False, "系统地址为空", ""))
+        else:
+            # 测试多种SSL/TLS配置和SSO重定向处理
+            connection_success = False
+            best_config = ""
+            error_details = ""
+            redirect_info = ""
+            
+            # 配置1: 使用自定义SSL适配器处理SSO重定向
+            try:
+                import ssl
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.ssl_ import create_urllib3_context
+                
+                class CustomSSLAdapter(HTTPAdapter):
+                    """自定义SSL适配器，支持较旧的TLS版本和SSO重定向"""
+                    def init_poolmanager(self, *args, **kwargs):
+                        ctx = create_urllib3_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        ctx.set_ciphers('DEFAULT:@SECLEVEL=1')
+                        kwargs['ssl_context'] = ctx
+                        return super().init_poolmanager(*args, **kwargs)
+                
+                session = requests.Session()
+                session.mount("https://", CustomSSLAdapter())
+                session.verify = False
+                session.headers.update({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                
+                start_time = time.time()
+                
+                # 尝试访问FormMain.aspx（这会触发SSO重定向）
+                test_url = f"{base_url.rstrip('/')}/FormMain.aspx"
+                response = session.get(test_url, timeout=15, allow_redirects=True)
+                response_time = int((time.time() - start_time) * 1000)
+                
+                if response.status_code == 200:
+                    connection_success = True
+                    best_config = "SSO重定向处理"
+                    
+                    # 检查重定向链
+                    if response.history:
+                        redirect_count = len(response.history)
+                        redirect_info = f"处理了 {redirect_count} 次重定向"
+                        
+                        # 检查是否经过SSO服务器
+                        sso_redirect = any("sso.hnhfpc.gov.cn" in resp.url for resp in response.history)
+                        if sso_redirect:
+                            redirect_info += " (包含SSO认证)"
+                    
+                    # 检查是否是公卫系统
+                    is_ggws = "ggws" in response.text.lower() or "公卫" in response.text or "湖南省基层卫生信息系统" in response.text
+                    system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                    
+                    # 检查是否有Token
+                    has_token = "Token" in response.url or "token" in response.url.lower()
+                    token_info = "有认证Token" if has_token else "无Token（可能需要登录）"
+                    
+                    diagnostics.append(("系统连接", True, 
+                                      f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                      f"{redirect_info}; {token_info}"))
+                else:
+                    error_details = f"HTTP {response.status_code}"
+                    
+            except Exception as e:
+                error_details = f"SSO重定向处理失败: {str(e)}"
+            
+            # 配置2: 标准HTTPS连接（备用）
+            if not connection_success:
+                try:
+                    start_time = time.time()
+                    response = requests.get(base_url, timeout=10, verify=True)
+                    response_time = int((time.time() - start_time) * 1000)
+                    
+                    if response.status_code == 200:
+                        connection_success = True
+                        best_config = "标准HTTPS"
+                        
+                        # 检查是否是公卫系统
+                        is_ggws = "ggws" in response.text.lower() or "公卫" in response.text
+                        system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                        
+                        diagnostics.append(("系统连接", True, 
+                                          f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                          ""))
+                    else:
+                        error_details = f"HTTP {response.status_code}"
+                except Exception as e:
+                    error_details = f"标准HTTPS失败: {str(e)}"
+            
+            # 配置3: 跳过证书验证（备用）
+            if not connection_success:
+                try:
+                    start_time = time.time()
+                    response = requests.get(base_url, timeout=10, verify=False)
+                    response_time = int((time.time() - start_time) * 1000)
+                    
+                    if response.status_code == 200:
+                        connection_success = True
+                        best_config = "跳过证书验证"
+                        
+                        # 检查是否是公卫系统
+                        is_ggws = "ggws" in response.text.lower() or "公卫" in response.text
+                        system_type = "公卫3.0系统" if is_ggws else "未知系统"
+                        
+                        diagnostics.append(("系统连接", True, 
+                                          f"{system_type}可访问 ({best_config}, 响应时间: {response_time}ms)",
+                                          ""))
+                    else:
+                        error_details = f"HTTP {response.status_code}"
+                except Exception as e:
+                    error_details = f"跳过证书验证失败: {str(e)}"
+            
+            if not connection_success:
+                diagnostics.append(("系统连接", False, 
+                                  f"所有连接尝试均失败", 
+                                  f"最后错误: {error_details}"))
+        
+        # 4. 检查配置完整性
+        missing_fields = []
+        config_details = []
+        
+        for field, display_name in [
+            ("username", "账号"),
+            ("ggws_base_url", "系统地址"),
+            ("org_code", "机构代码"),
+            ("doctor", "签约医生"),
+            ("team", "签约团队")
+        ]:
+            value = self._cfg.get(field, "")
+            if value:
+                config_details.append(f"{display_name}: {value}")
+            else:
+                missing_fields.append(display_name)
+        
+        if missing_fields:
+            diagnostics.append(("配置检查", False, 
+                              f"缺失字段: {', '.join(missing_fields)}",
+                              f"现有配置: {'; '.join(config_details) if config_details else '无'}"))
+        else:
+            diagnostics.append(("配置检查", True, 
+                              "所有必需配置完整",
+                              f"配置详情: {'; '.join(config_details)}"))
+        
+        # 5. 检查登录状态 - 使用统一的检测函数
+        login_detected, login_message, login_details = self._check_login_status()
+        diagnostics.append(("登录状态", login_detected, login_message, login_details))
+        
+        return diagnostics
+    
+    def _display_detailed_diagnostics(self, diagnostics: List[Tuple[str, bool, str, str]]):
+        """显示详细诊断结果"""
+        self.enhanced_diag_text.configure(state=tk.NORMAL)
+        self.enhanced_diag_text.delete(1.0, tk.END)
+        
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.enhanced_diag_text.insert(tk.END, f"详细诊断时间: {current_time}\n")
+        self.enhanced_diag_text.insert(tk.END, "="*60 + "\n\n")
+        
+        all_passed = True
+        
+        for name, success, message, details in diagnostics:
+            icon = "✅" if success else "❌"
+            tag = "success" if success else "error"
+            
+            if not success:
+                all_passed = False
+            
+            self.enhanced_diag_text.insert(tk.END, f"{icon} {name}: ")
+            self.enhanced_diag_text.insert(tk.END, f"{message}\n", tag)
+            
+            if details:
+                self.enhanced_diag_text.insert(tk.END, f"   └─ {details}\n", "details")
+        
+        # 配置标签样式
+        self.enhanced_diag_text.tag_config("success", foreground="green")
+        self.enhanced_diag_text.tag_config("error", foreground="red")
+        self.enhanced_diag_text.tag_config("details", foreground="gray")
+        
+        self.enhanced_diag_text.configure(state=tk.DISABLED)
+        self.enhanced_diagnose_btn.configure(state=tk.NORMAL)
+        self.enhanced_detailed_diagnose_btn.configure(state=tk.NORMAL)
+        
+        if all_passed:
+            self.enhanced_status_var.set("详细诊断完成: 所有测试通过")
+            self.enhanced_connection_status_var.set("已连接")
+            self.enhanced_connection_status_label.configure(foreground="green")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        else:
+            self.enhanced_status_var.set("详细诊断完成: 发现问题")
+            self.enhanced_connection_status_var.set("连接异常")
+            self.enhanced_connection_status_label.configure(foreground="red")
+            
+            # 提供修复建议
+            self.enhanced_diag_text.configure(state=tk.NORMAL)
+            self.enhanced_diag_text.insert(tk.END, "\n" + "="*60 + "\n")
+            self.enhanced_diag_text.insert(tk.END, "🔧 修复建议:\n\n")
+            
+            for name, success, message, details in diagnostics:
+                if not success:
+                    if "SSL" in message or "握手" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 尝试使用网页登录方式\n", "advice")
+                    elif "缺失" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 请填写完整配置信息\n", "advice")
+                    elif "未登录" in message:
+                        self.enhanced_diag_text.insert(tk.END, f"• {name}: 请先登录系统\n", "advice")
+            
+            self.enhanced_diag_text.tag_config("advice", foreground="blue")
+            self.enhanced_diag_text.configure(state=tk.DISABLED)
+    
+    def _open_web_login(self):
+        """打开网页登录 (方式1)"""
+        account = self.enhanced_api_account_var.get().strip()
+        base_url = self.enhanced_url_var.get().strip()
+        
+        if not base_url:
+            messagebox.showwarning("提示", "请输入公卫3.0系统地址")
+            return
+        
+        self.enhanced_status_var.set("正在打开浏览器...")
+        self.enhanced_web_login_btn.configure(state=tk.DISABLED)
+
+        # Pre-bind PH3 client base_url on main thread so subsequent
+        # 同步配置 calls hit the right server.
+        try:
+            self.client.base_url = base_url.rstrip("/")
+        except Exception:
+            pass
+
+        def worker():
+            try:
+                # 构建登录URL - 使用FormMain.aspx触发SSO重定向
+                # 这是PH3Client使用的正确登录流程
+                login_url = f"{base_url.rstrip('/')}/FormMain.aspx"
+                webbrowser.open(login_url)
+                success = True
+                message = (f"已打开浏览器: {login_url}\n"
+                           "请在浏览器中完成SSO登录")
+            except Exception as e:
+                success = False
+                message = f"打开浏览器失败: {str(e)}"
+            
+            # All Tk-variable writes + config save happen on the main thread.
+            self._safe_after(lambda: self._web_login_apply_and_finish(
+                success, message, account, base_url
+            ))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _web_login_apply_and_finish(self, success: bool, message: str,
+                                    account: str, base_url: str):
+        """Main-thread continuation for `_open_web_login`."""
+        if success and (account or base_url):
+            try:
+                self.var_account.set(account)
+                self.var_url.set(base_url)
+                self._cfg["username"] = account
+                self._cfg["ggws_base_url"] = base_url
+                self._save_current_config()
+            except Exception as e:
+                # Don't crash the UI if config save fails for some reason.
+                print(f"[web-login] config save warning: {e}")
+        self._web_login_result(success, message)
+    def _web_login_result(self, success: bool, message: str):
+        """网页登录结果"""
+        self.enhanced_web_login_btn.configure(state=tk.NORMAL)
+        
+        if success:
+            self.enhanced_status_var.set("已打开浏览器，请在浏览器中登录")
+            
+            # 显示提示信息
+            guide = """登录提示：
+            
+1. 请在浏览器中完成公卫3.0系统登录
+2. 登录成功后，返回本程序
+3. 点击「同步配置」按钮提取机构、团队、医生信息
+4. 然后即可使用查询和签约功能
+            
+注意：请确保在浏览器中登录的是正确的账号和系统。"""
+            
+            messagebox.showinfo("登录提示", guide)
+            
+            # 启用同步按钮
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+            
+        else:
+            self.enhanced_status_var.set("打开浏览器失败")
+            messagebox.showerror("错误", message)
+    
+    def _sync_login_configuration(self):
+        """同步配置 - 从浏览器登录后的 PH3 会话中提取机构信息,
+        并把 PH3Client 提升为 fully_authenticated。"""
+        self.enhanced_status_var.set("正在同步配置信息...")
+        self.enhanced_sync_btn.configure(state=tk.DISABLED)
+        
+        def worker():
+            try:
+                current_page_html = self._get_current_page_html()
+                if not current_page_html:
+                    self._safe_after(lambda: self._sync_login_failed(
+                        "无法获取当前页面，请确保已在浏览器中登录"
+                    ))
+                    return
+                
+                # 让 PH3Client 自己解析 token 与用户信息 — 这是登录正常路径
+                # 复用同样的解析器，确保后续 query/sign 使用的是真实会话状态。
+                token_ok = False
+                try:
+                    token_ok = self.client._extract_tokens(current_page_html)
+                except Exception as e:
+                    print(f"[sync] _extract_tokens raised: {e}")
+                try:
+                    self.client._extract_user_info(current_page_html)
+                except Exception as e:
+                    print(f"[sync] _extract_user_info raised: {e}")
+                # 若客户端没拿到 org_code, 尝试拉取并下钻 org tree
+                if not getattr(self.client, "org_code", ""):
+                    try:
+                        orgs = self.client.get_org_tree("0")
+                        if orgs:
+                            self.client._drill_org_tree(orgs)
+                    except Exception as e:
+                        print(f"[sync] org_tree drill failed: {e}")
+
+                extracted = self._extract_org_info_from_html(current_page_html)
+                # 客户端的 org/doctor/team 优先 (它们来自真实 SSO 解析)
+                for src_attr, key in (
+                    ("org_code", "org_code"),
+                    ("org_name", "org_name"),
+                    ("doctor_name", "doctor_name"),
+                    ("team_name", "team_name"),
+                ):
+                    val = getattr(self.client, src_attr, "")
+                    if val:
+                        extracted[key] = val
+                extracted["synced_at"] = datetime.now().isoformat()
+                extracted["extraction_method"] = "actual_session"
+                extracted["_token_extracted"] = bool(token_ok)
+                
+                self._safe_after(
+                    lambda: self._sync_apply_and_complete(extracted)
+                )
+            except Exception as e:
+                error_msg = f"同步配置失败: {str(e)}"
+                print(f"❌ {error_msg}")
+                self._safe_after(lambda: self._sync_login_failed(error_msg))
+        
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _sync_apply_and_complete(self, extracted: Dict[str, Any]):
+        """Main-thread continuation for `_sync_login_configuration`.
+
+        Critically: if extraction yielded a real org_code, promote the
+        PH3Client to a fully-authenticated state and mirror values into
+        the 主界面 Tk variables so [查询] becomes immediately usable.
+        """
+        try:
+            self._cfg.update(extracted)
+            self.enhanced_account_var.set(self._cfg.get("username", "未设置"))
+
+            org_code = (extracted.get("org_code") or "").strip()
+            if org_code:
+                # 同步成功 → 该会话已通过完整鉴权
+                try:
+                    self.client.logged_in = True
+                    self.client.qr_pending = False
+                    if extracted.get("org_code"):
+                        self.client.org_code = extracted["org_code"]
+                    if extracted.get("org_name"):
+                        self.client.org_name = extracted["org_name"]
+                    if extracted.get("doctor_name"):
+                        self.client.doctor_name = extracted["doctor_name"]
+                    if extracted.get("team_name"):
+                        self.client.team_name = extracted["team_name"]
+                except Exception as e:
+                    print(f"[sync] could not promote client state: {e}")
+
+                # 镜像到主界面查询面板的输入框 (查询/签约依赖这些 Tk 变量)
+                try:
+                    self.var_org.set(org_code)
+                    if extracted.get("doctor_name"):
+                        self.var_doctor.set(extracted["doctor_name"])
+                    if extracted.get("team_name"):
+                        self.var_team.set(extracted["team_name"])
+                except Exception as e:
+                    print(f"[sync] could not mirror to main UI: {e}")
+
+            self._save_current_config()
+        except Exception as e:
+            print(f"[sync] apply warning: {e}")
+        self._sync_login_complete(extracted)
+    
+    def _get_current_page_html(self) -> str:
+        """获取当前页面HTML"""
+        try:
+            # 尝试访问主页面
+            response = self.client.session.get(self.client._url("/FormMain.aspx"), timeout=30)
+            if response.status_code == 200:
+                return response.text
+            
+            # 如果失败，尝试其他页面
+            response = self.client.session.get(self.client._url("/Index.aspx"), timeout=30)
+            if response.status_code == 200:
+                return response.text
+                
+        except Exception as e:
+            print(f"❌ 获取当前页面失败: {e}")
+        
+        return ""
+    
+    def _extract_org_info_from_html(self, html: str) -> dict:
+        """从HTML中提取机构信息"""
+        import re
+        
+        result = {
+            "org_code": "",
+            "org_name": "",
+            "team_code": "",
+            "team_name": "",
+            "doctor_code": "",
+            "doctor_name": ""
+        }
+        
+        if not html:
+            return result
+        
+        # 尝试多种机构代码模式
+        org_patterns = [
+            r"""(?:ORGCODE|orgcode|OrgCode)\s*[=:]\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*:\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*:\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*:\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""var\s+orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""var\s+ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            r"""type\s*=\s*['"]hidden['"]\s+name\s*=\s*['"]orgcode['"]\s+value\s*=\s*['"](\d{10,})['"]""",
+            r"""data-orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgCode\s*=\s*['"](\d{10,})['"]""",
+            r"""orgcode\s*=\s*['"](\d{10,})['"]""",
+            r"""ORGCODE\s*=\s*['"](\d{10,})['"]""",
+            r"""org[^>]*?['"](\d{10,})['"]""",
+        ]
+        
+        # 提取机构代码
+        for pattern in org_patterns:
+            org_m = re.search(pattern, html, re.IGNORECASE)
+            if org_m:
+                result["org_code"] = org_m.group(1)
+                break
+        
+        # 提取机构名称
+        org_name_patterns = [
+            r"""orgName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""ORGNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""机构名称[^>]*?['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in org_name_patterns:
+            name_m = re.search(pattern, html, re.IGNORECASE)
+            if name_m:
+                result["org_name"] = name_m.group(1)
+                break
+        
+        # 提取医生信息
+        doctor_patterns = [
+            r"""doctorName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""DOCTORNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""医生姓名[^>]*?['"]([^'"]+)['"]""",
+            r"""<span[^>]*?id="lblDoctor"[^>]*?>([^<]+)</span>""",
+        ]
+        
+        for pattern in doctor_patterns:
+            doctor_m = re.search(pattern, html, re.IGNORECASE)
+            if doctor_m:
+                result["doctor_name"] = doctor_m.group(1)
+                break
+        
+        # 提取团队信息
+        team_patterns = [
+            r"""teamName\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""TEAMNAME\s*[=:]\s*['"]([^'"]+)['"]""",
+            r"""团队名称[^>]*?['"]([^'"]+)['"]""",
+        ]
+        
+        for pattern in team_patterns:
+            team_m = re.search(pattern, html, re.IGNORECASE)
+            if team_m:
+                result["team_name"] = team_m.group(1)
+                break
+        
+        return result
+    
+    def _sync_login_failed(self, error_message: str):
+        """同步配置失败"""
+        self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        self.enhanced_status_var.set("同步失败")
+        messagebox.showerror("同步失败", f"配置同步失败:\n\n{error_message}\n\n请确保：\n1. 已在浏览器中登录公卫3.0系统\n2. 登录的账号有权限访问当前机构\n3. 网络连接正常")
+    
+    def _sync_login_complete(self, extracted: Dict[str, Any]):
+        """同步完成"""
+        self.enhanced_sync_btn.configure(state=tk.NORMAL)
+        
+        # 显示提取的信息
+        info_text = "✅ 配置同步完成！\n\n已提取的信息：\n"
+        for key, value in extracted.items():
+            if value and key not in ['synced_at']:
+                info_text += f"  • {key}: {value}\n"
+        
+        messagebox.showinfo("同步完成", info_text)
+        self.enhanced_status_var.set("配置同步完成")
+        
+        # 重新运行诊断
+        self._run_login_diagnosis()
+    
+    def _perform_api_login(self):
+        """执行API登录 (方式2)"""
+        account = self.enhanced_api_account_var.get().strip()
+        password = self.enhanced_api_password_var.get().strip()
+        base_url = self.enhanced_url_var.get().strip()
+        
+        if not account or not password or not base_url:
+            messagebox.showwarning("提示", "请输入完整的登录信息（账号、密码、系统地址）")
+            return
+        
+        self.enhanced_status_var.set("正在登录...")
+        self.enhanced_api_login_btn.configure(state=tk.DISABLED)
+        
+        def worker():
+            try:
+                # 调用现有的登录方法 (网络IO在 worker 线程)
+                success, message = self.client.login(
+                    base_url, account, password
+                )
+            except Exception as e:
+                success, message = False, f"登录异常: {str(e)}"
+            
+            # All Tk-variable writes + config save happen on the main thread.
+            self._safe_after(lambda: self._api_login_apply_and_finish(
+                success, message, account, password, base_url
+            ))
+        
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _api_login_apply_and_finish(self, success: bool, message: str,
+                                    account: str, password: str,
+                                    base_url: str):
+        """Main-thread continuation for `_perform_api_login`."""
+        if success:
+            try:
+                self.var_account.set(account)
+                self.var_password.set(password)
+                self.var_url.set(base_url)
+                self._cfg["username"] = account
+                self._cfg["password"] = password
+                self._cfg["ggws_base_url"] = base_url
+                self._save_current_config()
+            except Exception as e:
+                print(f"[api-login] config save warning: {e}")
+        self._api_login_result(success, message)
+    
+    def _api_login_result(self, success: bool, message: str):
+        """API登录结果"""
+        self.enhanced_api_login_btn.configure(state=tk.NORMAL)
+        
+        if not success:
+            self.enhanced_status_var.set("登录失败")
+            messagebox.showerror("登录失败", message)
+            return
+
+        # success=True 也可能只是 "Token已下发但二维码未扫描"
+        if getattr(self.client, "qr_pending", False):
+            self.enhanced_status_var.set("等待扫码...")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+            # 自动弹出集成 QR 对话框 — 用户不再需要切到浏览器再回来同步.
+            self._launch_integrated_qr_login()
+        else:
+            self.enhanced_status_var.set("登录成功")
+            self.enhanced_sync_btn.configure(state=tk.NORMAL)
+            messagebox.showinfo("登录成功", message)
+            self._run_login_diagnosis()
+
+    def _on_manual_qr_login(self):
+        """[📱 扫码补登] 按钮处理: 用户主动开启扫码窗口.
+
+        三种触发场景:
+          1. API 登录已通过但 2FA 待扫描, 用户先取消了自动弹出的窗口.
+          2. session 失效, 想用扫码刷新会话避免再输密码.
+          3. 没用过 API 登录, 但已经在网页扫了, 想强制 finalize 一次.
+
+        前提: client.session 已经在前面的 API 登录里创建好了 (cookies 在内).
+        如果没有, 需要用户先点 [API 直接登录] 至少一次.
+        """
+        if not getattr(self.client, "session", None) or not getattr(self.client, "base_url", ""):
+            # 没有 session — 帮用户先做一次 "无密码探测", 拉一遍登录页
+            # 让 cookies 出来, 再让他扫码
+            base_url = self.enhanced_url_var.get().strip()
+            account = (self.enhanced_api_account_var.get().strip()
+                       or self._cfg.get("username", ""))
+            password = (self.enhanced_api_password_var.get().strip()
+                        or self._cfg.get("password", ""))
+            if not (base_url and account and password):
+                messagebox.showinfo(
+                    "提示",
+                    "请先填写账号 / 密码 / 系统地址, 然后:\n"
+                    "  • 点 [API 直接登录] 完成密码这步, 二维码会自动弹出\n"
+                    "  • 或在 [API 直接登录] 之后, 用本按钮再次扫码.",
+                )
+                return
+            # 走一次完整 API 登录, 让 client.session 准备好
+            self._perform_api_login()
+            return
+
+        self._launch_integrated_qr_login()
+
+    def _launch_integrated_qr_login(self):
+        """弹出集成的二维码扫码窗口; 扫码完成后自动 finalize 登录.
+
+        若用户取消 / 选择改用浏览器扫码, 退回提示老路径 (透明降级).
+        """
+        try:
+            dlg = QRLoginDialog(self, self.client)
+            ok, info = dlg.show()
+        except Exception as e:
+            ok, info = False, "QR 弹窗异常: %s" % e
+
+        if ok:
+            # finalize 已经把 logged_in=True, qr_pending=False, org_code 等填好
+            self.enhanced_status_var.set("登录成功 (扫码完成)")
+            try:
+                self._sync_login_configuration()  # 自动 sync 一次 (拉团队/服务包)
+            except Exception:
+                pass
+            messagebox.showinfo("登录成功", info)
+            self._run_login_diagnosis()
+            return
+
+        # 用户取消或改走浏览器路径 — 给老办法的提示, 不再阻断
+        if "网页" in info:
+            messagebox.showinfo(
+                "改用浏览器扫码",
+                "请点击 [跳转到3.0系统登录] 进入网页登录扫码,\n"
+                "完成后回到本程序点击 [同步配置]。",
+            )
+        else:
+            self.enhanced_status_var.set("登录不完整: 需要二维码验证")
+            messagebox.showwarning(
+                "需要二维码验证",
+                "尚未完成扫码。可以:\n"
+                "  • 重新点击 [API 登录] 再次弹出二维码窗口\n"
+                "  • 或点击 [跳转到3.0系统登录] 在浏览器中扫码后回来 [同步配置]",
+            )
+        self._run_login_diagnosis()
 
 
 def main():

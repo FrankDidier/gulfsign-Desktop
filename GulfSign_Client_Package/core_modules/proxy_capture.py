@@ -43,6 +43,79 @@ TUNNEL_HOSTS = {
     "mp.weixin.qq.com",
 }
 
+# 家医签约抓包: 用户在公卫3.0网页里点 [家医签约] 按钮时, 我们要捕获 POST.
+# 可疑端点 (基于 js_native.pyc 反编译 + 已知接口表):
+#   /Sys_JCWS/B0105/Do_B0105_Handler.ashx  ← 居民档案签约相关
+#   /Sys_JCWS/B0107/Do_B0107_Handler.ashx  ← 团队/医生签约管理
+#   /Sys_JCWS/B0103/Do_B0103_Handler.ashx  ← 家庭档案/成员
+#   /Sys_JCWS/JKDA/Do_Query_Handler.ashx   ← 健康档案查询 (排除, 这是 read-only)
+#
+# 我们捕获以下写操作的 POST (JKDA / 纯查询 GET 不抓):
+#   B0105/B0107/B0103 → 家医签约相关
+#   B0101 ACTION=2     → 档案修改 (★ 年龄绕行就是改这里的 SFZH/CSRQ, 必抓)
+#   jkxbservice.ashx   → 健康卡 insertJtysqy(建居民申请) 等签约写
+#   Wx_jmjkk/Handler   → 健康卡绑卡注册
+SIGN_CAPTURE_PATH_PATTERNS = (
+    re.compile(rb"/Sys_JCWS/B0105/Do_B0105_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/Sys_JCWS/B0107/Do_B0107_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/Sys_JCWS/B0103/Do_B0103_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/Sys_JCWS/B0101/Do_B0101_Handler\.ashx", re.IGNORECASE),
+    re.compile(rb"/httpapi/jkxbservice\.ashx", re.IGNORECASE),
+    re.compile(rb"/gzc/Wx_jmjkk/Handler\.ashx", re.IGNORECASE),
+)
+
+
+def classify_write(path: str, action: str, body_form: dict) -> dict:
+    """对一条被捕获的写请求做分类, 重点识别"年龄绕行"(B0101 改龄)。
+
+    返回一个 dict, 至少含 ``type``; 当判定为档案改龄且把出生年改到
+    未成年/老年区间时, 置 ``age_bypass_suspected=True`` 并附 ``implied_age``。
+    纯函数, 便于单测。
+    """
+    import datetime
+    p = (path or "").upper()
+    act = str(action or "")
+    form = body_form or {}
+
+    def g(*keys):
+        for k in keys:
+            for kk in (k, k.upper(), k.lower()):
+                if kk in form and form.get(kk) not in (None, ""):
+                    return str(form.get(kk))
+        return ""
+
+    if "B0101" in p and act == "2":
+        sfzh = g("SFZH")
+        csrq = g("CSRQ")
+        kind = {
+            "type": "档案修改(B0101 ACTION=2)",
+            "sfzh_tail": sfzh[-4:] if len(sfzh) >= 4 else "",
+            "csrq": csrq,
+        }
+        birth_year = None
+        if len(sfzh) >= 14 and sfzh[6:10].isdigit():
+            birth_year = int(sfzh[6:10])
+        elif len(csrq) >= 4 and csrq[:4].isdigit():
+            birth_year = int(csrq[:4])
+        if birth_year:
+            age = datetime.date.today().year - birth_year
+            kind["birth_year"] = birth_year
+            kind["implied_age"] = age
+            if age < 18 or age > 60:
+                kind["age_bypass_suspected"] = True
+        return kind
+    if "JKXBSERVICE" in p:
+        return {"type": "健康卡签约写(jkxbservice)", "action": act}
+    if "WX_JMJKK/HANDLER" in p:
+        return {"type": "健康卡绑卡注册", "action": act}
+    if "B0105" in p:
+        return {"type": "家医签约(B0105)", "action": act}
+    if "B0107" in p:
+        return {"type": "团队/医生签约(B0107)", "action": act}
+    if "B0103" in p:
+        return {"type": "家庭档案(B0103)", "action": act}
+    return {"type": "其它写操作", "action": act}
+
 OPENID_PATTERN = re.compile(
     rb'[?&](?:[Oo]penid|openId|OPENID)=([a-zA-Z0-9_-]{20,})', re.IGNORECASE
 )
@@ -402,7 +475,12 @@ class CertManager:
 
 
 class OpenIDProxy:
-    """MITM proxy that captures OpenID from health card traffic."""
+    """MITM proxy that captures OpenID from health card traffic.
+
+    Optional 二次身份: 通过传入 ``on_sign_captured`` 回调激活 "家医签约抓包"
+    模式 — 当 MITM 看到 ggws.hnhfpc.gov.cn 上对 B0105/B0107/B0103 Handler 的
+    POST 请求时, 把完整的 (URL, headers, body) 序列化成 JSON 落盘并回调.
+    """
 
     def __init__(
         self,
@@ -410,22 +488,31 @@ class OpenIDProxy:
         on_openid: Optional[Callable] = None,
         on_log: Optional[Callable] = None,
         on_wechatcode: Optional[Callable] = None,
+        on_sign_captured: Optional[Callable] = None,
+        sign_capture_dir: Optional[str] = None,
     ):
         self.port = port
         self.on_openid = on_openid
         self.on_log = on_log
         self.on_wechatcode = on_wechatcode
+        # 家医签约抓包回调 — 接收 dict: {timestamp, host, method, path, query,
+        # action, headers, body_text, body_form, raw_request}
+        self.on_sign_captured = on_sign_captured
         self._running = False
         self._server_socket = None
         self._thread = None
         self._found_openids: Set[str] = set()
         self._found_wechatcodes: Set[str] = set()
+        self._sign_captures: list = []
         self._traffic_log_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         cert_dir = os.path.join(base_dir, "certs")
         self.cert_mgr = CertManager(cert_dir)
         self.traffic_log_path = os.path.join(base_dir, "traffic_log.txt")
+        self.sign_capture_dir = sign_capture_dir or os.path.join(
+            base_dir, ".dbg", "sign_captures"
+        )
 
     @property
     def ca_cert_path(self):
@@ -460,6 +547,146 @@ class OpenIDProxy:
                     f.write(text + "\n")
         except Exception:
             pass
+
+        # 家医签约抓包: 仅在 REQUEST 方向, 仅对 ggws 域名, 仅 POST.
+        if direction == ">>> REQUEST" and "ggws" in (hostname or "").lower():
+            try:
+                self._maybe_capture_sign_request(hostname, data)
+            except Exception as e:
+                logger.debug("sign capture skip: %s", e)
+
+    def _maybe_capture_sign_request(self, hostname: str, data: bytes):
+        """检测是否为 [家医签约] / [即时签约] / [批量签约] 等 POST,
+        命中则解析 → JSON 落盘 → 回调."""
+        if not data:
+            return
+        # 必须 POST (GET 是查询/页面加载, 跳过)
+        if not data.startswith(b"POST "):
+            return
+
+        # 拆 request line / headers / body
+        head_end = data.find(b"\r\n\r\n")
+        if head_end < 0:
+            return
+        head_part = data[:head_end].decode("utf-8", errors="replace")
+        body_bytes = data[head_end + 4:]
+
+        lines = head_part.split("\r\n")
+        if not lines:
+            return
+        # 第一行: "POST /path?query HTTP/1.1"
+        try:
+            _method, path_full, _ver = lines[0].split(" ", 2)
+        except ValueError:
+            return
+
+        # 命中签约相关 Handler?
+        path_bytes = path_full.encode("utf-8", errors="replace")
+        if not any(p.search(path_bytes) for p in SIGN_CAPTURE_PATH_PATTERNS):
+            return
+
+        # 解析 headers
+        headers: dict = {}
+        for ln in lines[1:]:
+            if ":" in ln:
+                k, _, v = ln.partition(":")
+                headers[k.strip()] = v.strip()
+
+        # 拆 path / query
+        from urllib.parse import urlparse, parse_qsl
+        u = urlparse("http://x" + path_full)  # urlparse 需要 scheme
+        path_only = u.path
+        query_pairs = parse_qsl(u.query, keep_blank_values=True)
+        query_dict = dict(query_pairs)
+        action = (
+            query_dict.get("ACTION") or query_dict.get("action") or ""
+        )
+
+        # 解析 body — 尝试 form-encoded; 失败则保留 raw
+        body_text = body_bytes.decode("utf-8", errors="replace")
+        body_form: dict = {}
+        ct = headers.get("Content-Type", "").lower()
+        if "application/x-www-form-urlencoded" in ct or (
+            body_text and "=" in body_text and "<" not in body_text[:32]
+        ):
+            try:
+                body_form = dict(parse_qsl(body_text, keep_blank_values=True))
+            except Exception:
+                body_form = {}
+
+        import datetime
+        import json
+        ts = datetime.datetime.now()
+        record = {
+            "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "host": hostname,
+            "method": "POST",
+            "path": path_only,
+            "query": query_dict,
+            "action": action,
+            "headers": headers,
+            "body_text": body_text[:8000],
+            "body_form": body_form,
+            # raw_request 截 8KB 防止巨大 body 撑爆 JSON
+            "raw_request": data[:8000].decode("utf-8", errors="replace"),
+        }
+
+        # 分类 + 年龄绕行识别
+        try:
+            kind = classify_write(path_only, action, body_form)
+            record["_write_kind"] = kind
+            if kind.get("age_bypass_suspected"):
+                self._log(
+                    "⚠⚠ 检测到【档案改龄·疑似年龄绕行】: 出生年→%s (约%s岁), "
+                    "SFZH尾号 %s — 对方正在把此人改成免人脸年龄段!" % (
+                        kind.get("birth_year"), kind.get("implied_age"),
+                        kind.get("sfzh_tail") or "?",
+                    ),
+                    "warn",
+                )
+            elif kind.get("type", "").startswith("档案修改"):
+                self._log(
+                    "📝 检测到 B0101 档案修改 (ACTION=2) — 出生年=%s/约%s岁; "
+                    "未落在免人脸区间, 暂不判定绕行" % (
+                        kind.get("birth_year", "?"), kind.get("implied_age", "?"),
+                    ),
+                    "info",
+                )
+        except Exception:
+            pass
+
+        self._sign_captures.append(record)
+
+        # 落盘到 sign_captures/sign_<ts>_<action>.json
+        try:
+            os.makedirs(self.sign_capture_dir, exist_ok=True)
+            fn = "sign_%s_%s.json" % (
+                ts.strftime("%Y%m%d_%H%M%S_%f")[:-3],
+                (action or "noaction").replace("/", "_"),
+            )
+            fp = os.path.join(self.sign_capture_dir, fn)
+            with open(fp, "w", encoding="utf-8") as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+            record["_saved_to"] = fp
+            self._log(
+                "📡 已捕获签约请求: %s ACTION=%s → %s" % (
+                    path_only, action or "?", os.path.basename(fp),
+                ),
+                "ok",
+            )
+        except Exception as e:
+            self._log("签约请求保存失败: %s" % e, "warn")
+
+        if self.on_sign_captured:
+            try:
+                self.on_sign_captured(record)
+            except Exception:
+                pass
+
+    @property
+    def sign_captures(self) -> list:
+        """返回当前会话内已捕获的签约请求记录列表 (副本)."""
+        return list(self._sign_captures)
 
     def start(self) -> bool:
         if self._running:
@@ -745,10 +972,41 @@ h1{color:#333;font-size:22px}
             client_ssl.settimeout(60)
 
             while True:
+                # 读完整 HTTP 请求 (headers + body). 修复 v3.1.1 之前的 bug:
+                # 单次 recv 只拿到 headers, body 在下一帧时被丢弃 — 直接导致
+                # 抓签约请求时 body_form 为空, 重放时无法替换 person_id.
+                request_data = b""
+                req_hdr_end = -1
+                req_cl = -1
+                req_chunked = False
                 try:
-                    request_data = client_ssl.recv(65536)
+                    while True:
+                        chunk = client_ssl.recv(65536)
+                        if not chunk:
+                            break
+                        request_data += chunk
+
+                        if req_hdr_end < 0 and b"\r\n\r\n" in request_data:
+                            req_hdr_end = request_data.index(b"\r\n\r\n") + 4
+                            hdr_lower = request_data[:req_hdr_end].lower()
+                            m = re.search(rb"content-length:\s*(\d+)", hdr_lower)
+                            if m:
+                                req_cl = int(m.group(1))
+                            req_chunked = b"transfer-encoding: chunked" in hdr_lower
+
+                        if req_hdr_end > 0:
+                            if req_cl >= 0:
+                                if len(request_data) - req_hdr_end >= req_cl:
+                                    break
+                            elif req_chunked:
+                                if b"\r\n0\r\n\r\n" in request_data[-32:]:
+                                    break
+                            else:
+                                # 没 CL, 没 chunked — GET / 无 body 请求, headers 完整即可
+                                break
                 except (socket.timeout, ssl.SSLError, OSError):
-                    break
+                    pass
+
                 if not request_data:
                     break
 

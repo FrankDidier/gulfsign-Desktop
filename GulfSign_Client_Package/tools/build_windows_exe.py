@@ -165,6 +165,15 @@ hiddenimports.extend(collect_submodules('batch_processor'))
 hiddenimports.extend([
     'gmssl',
     'cryptography',
+    'Crypto',
+    'Crypto.Cipher',
+    'Crypto.PublicKey',
+    'Crypto.Signature',
+    'Crypto.Hash',
+    'Crypto.Util',
+    'Crypto.Random',
+    'pandas',
+    'openpyxl',
     'requests',
     'tkinter',
     'json',
@@ -243,16 +252,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='icon.ico' if os.path.exists('icon.ico') else None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='GulfSign_Client',
+    onefile=True,
 )
 '''
         

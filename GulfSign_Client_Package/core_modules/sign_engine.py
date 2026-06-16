@@ -122,6 +122,127 @@ class FullSignResult:
     contract_confirmed: bool = False
     rpc_set: bool = False
     previous_status: str = ""
+    age_bypass_attempted: bool = False
+    age_bypass_applied: bool = False
+    age_bypass_restored: bool = False
+    age_bypass_blocked_reason: str = ""
+
+
+@dataclass
+class HouseholdSignResult:
+    """户主代申请的汇总结果。
+
+    把一个户主 openid 名下绑定的全部家庭成员卡的逐人签约结果聚合起来,
+    便于 UI / 报告展示 "这一户 N 口人, 成功 M 人"。
+    """
+    openid: str = ""
+    head_name: str = ""
+    total: int = 0
+    succeeded: int = 0          # result.success == True (含 already_signed)
+    confirmed: int = 0          # 本次真正 editqr 确认成功
+    created: int = 0            # 本次新建了居民申请合同
+    already_signed: int = 0     # 早已是已签约, 跳过
+    failed: int = 0
+    results: List[FullSignResult] = field(default_factory=list)
+    error: str = ""
+
+    @property
+    def success(self) -> bool:
+        """整户视角: 至少处理了 1 人, 且无失败, 且无整体错误。"""
+        return bool(self.total) and self.failed == 0 and not self.error
+
+
+# ---------------------------------------------------------------------------
+# Age-bypass eligibility precheck
+# ---------------------------------------------------------------------------
+#
+# 历史评估 (`historical_limitations_verification_report.txt`) 给出的关键事实:
+#   * 健康卡平台从 SFZH 内嵌的出生年份判断年龄, 不读 3.0 档案的 CSRQ.
+#   * 服务端会拒绝对 "已实名认证" / "已面访" 居民的 SFZH 修改请求,
+#     错误文案: "已实名认证的对象身份证号码不允许修改".
+#   * 但对未实名 / 未面访的 *新建档* 居民, 修改是可行的 (8/8 已实名样本被拒,
+#     未实名样本未直接覆盖, 但服务端只在锁定的对象上拒绝).
+#
+# 因此在调起 `modify_archive` 前我们做一次本地启发式预检:
+#   1. 加载 B0101 编辑表单; 列出全部字段.
+#   2. 检查若干常见 "实名认证" / "面访" 标志字段是否非空.
+#   3. 若任一标志字段非空 -> `likely_blocked` (不阻塞流程, 只是给用户警告).
+#   4. 若无明显标志 -> `likely_eligible`.
+#
+# 服务端最终仍是权威; 我们只是减少明知会被拒绝的尝试与产出预检报告.
+#
+# 这些字段名是 GBT 的 B0101 标准 + 河南公卫的常见扩展; 实名/面访字段
+# 在不同省份命名不一致, 因此采用包含子串的方式做模糊匹配, 并保留全部
+# 加载到的原始字段供诊断.
+
+_REALNAME_FIELD_HINTS: Tuple[str, ...] = (
+    # 实名认证相关
+    "SMRZ", "smrz", "RZSJ", "rzsj", "RZBJ", "rzbj",
+    "SMBJ", "smbj", "SHZT", "shzt",
+    "B0101_19",   # 河南: 实名认证日期 (亦用于查询过滤 BEGIN/END)
+    "RZZT", "rzzt",
+)
+
+_VISITED_FIELD_HINTS: Tuple[str, ...] = (
+    # 面访 / 现场访视相关
+    "MFSJ", "mfsj", "MFRZ", "mfrz", "MFBJ", "mfbj",
+    "B0101_24", "B0101_25",   # 常见面访日期/状态扩展槽
+)
+
+
+@dataclass
+class AgeBypassEligibility:
+    """读取档案并启发式判断: 该居民的 SFZH 是否 *可能* 允许在线修改。
+
+    这不是一个保证: 服务端最终仍是权威. 它的目的是:
+      * 在批量场景下提前剔除会被拒绝的居民, 减少不必要写操作;
+      * 给操作员提供一个 "为什么这个人没法绕行" 的可读理由;
+      * 给出一份审计报告 (Excel) 用于合规留痕.
+    """
+    person_id: str = ""
+    name: str = ""
+    original_sfzh: str = ""
+    age: int = -1
+    needs_bypass: bool = False           # 18 <= age <= 60
+    archive_loaded: bool = False
+    likely_eligible: bool = False        # 启发式预测: 服务端会接受
+    block_reason: str = ""               # 若 likely_eligible=False, 解释原因
+    detected_realname_marks: List[str] = field(default_factory=list)
+    detected_visited_marks: List[str] = field(default_factory=list)
+    error: str = ""                      # 加载档案本身的错误
+    archive_fields: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def status(self) -> str:
+        if self.error:
+            return "error"
+        if not self.archive_loaded:
+            return "unknown"
+        if not self.needs_bypass:
+            if self.age >= 0 and (self.age < 18 or self.age > 60):
+                return "no_bypass_needed"
+            return "unknown"
+        return "eligible" if self.likely_eligible else "likely_blocked"
+
+    def to_audit_row(self) -> Dict[str, str]:
+        """扁平化为审计 Excel 一行 (姓名/SFZH 仅记录前后4位避免明文外泄)."""
+        def _mask(s: str) -> str:
+            if not s or len(s) < 8:
+                return s or ""
+            return s[:4] + "*" * (len(s) - 8) + s[-4:]
+        return {
+            "person_id": self.person_id,
+            "name": self.name,
+            "age": str(self.age) if self.age >= 0 else "",
+            "needs_bypass": "是" if self.needs_bypass else "否",
+            "status": self.status,
+            "likely_eligible": "是" if self.likely_eligible else "否",
+            "block_reason": self.block_reason,
+            "realname_marks": ",".join(self.detected_realname_marks),
+            "visited_marks": ",".join(self.detected_visited_marks),
+            "original_sfzh_masked": _mask(self.original_sfzh),
+            "error": self.error,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +276,7 @@ class SigningEngine:
     # ================================================================
 
     def resolve_team(
-        self, orgcode: str, team_name: str = "",
+        self, orgcode: str, team_name: str = "", health_card_id: str = "",
     ) -> Tuple[str, str]:
         """Find a team GUID+name for the given org.
 
@@ -163,7 +284,7 @@ class SigningEngine:
         Returns (team_guid, team_name).
         """
         if orgcode not in self._cached_teams:
-            teams = self.hc.query_teams(orgcode)
+            teams = self.hc.query_teams(orgcode, health_card_id)
             if not teams and self.ph3 and self.ph3.logged_in:
                 teams = self._teams_from_ph3()
             self._cached_teams[orgcode] = teams
@@ -172,17 +293,20 @@ class SigningEngine:
         if not teams:
             return "", team_name
 
+        def _tname(t: dict) -> str:
+            return (t.get("name") or t.get("B0107_01") or t.get("qytdmc")
+                    or t.get("b0105_03") or "")
+
+        def _tguid(t: dict) -> str:
+            return t.get("guid") or t.get("GUID") or t.get("id") or ""
+
         for t in teams:
-            t_name = t.get("name", t.get("qytdmc", t.get("b0105_03", "")))
-            t_guid = t.get("guid", t.get("GUID", t.get("id", "")))
-            if team_name and team_name in t_name:
-                return t_guid, t_name
+            t_name = _tname(t)
+            if team_name and t_name and team_name in t_name:
+                return _tguid(t), t_name
 
         first = teams[0]
-        return (
-            first.get("guid", first.get("GUID", first.get("id", ""))),
-            team_name or first.get("name", first.get("qytdmc", "")),
-        )
+        return _tguid(first), (team_name or _tname(first))
 
     def _teams_from_ph3(self) -> List[dict]:
         """Load teams from the 3.0 system's signing form (fallback)."""
@@ -215,7 +339,7 @@ class SigningEngine:
         return []
 
     def resolve_packages(
-        self, orgcode: str, population_type: str = "",
+        self, orgcode: str, population_type: str = "", health_card_id: str = "",
     ) -> Tuple[str, str]:
         """Find service packages for the given org.
 
@@ -224,7 +348,8 @@ class SigningEngine:
         """
         cache_key = "%s|%s" % (orgcode, population_type)
         if cache_key not in self._cached_packages:
-            pkgs = self.hc.query_service_packages(orgcode, population_type)
+            pkgs = self.hc.query_service_packages(
+                orgcode, population_type, health_card_id)
             if pkgs:
                 guids = ",".join(
                     p.get("guid", p.get("GUID", "")) for p in pkgs
@@ -465,7 +590,8 @@ class SigningEngine:
             end_date = str(int(start_date[:4]) + yrs) + start_date[4:]
 
         if not team_guid and orgcode:
-            team_guid, team_name = self.resolve_team(orgcode, team_name)
+            team_guid, team_name = self.resolve_team(
+                orgcode, team_name, card.health_card_id)
             if team_name:
                 log("  签约团队: %s" % team_name, "info")
 
@@ -480,7 +606,8 @@ class SigningEngine:
             return result
 
         if not package_guids and orgcode:
-            package_guids, package_names = self.resolve_packages(orgcode)
+            package_guids, package_names = self.resolve_packages(
+                orgcode, "", card.health_card_id)
             if package_names:
                 log("  服务包: %s" % package_names[:60], "info")
 
@@ -495,7 +622,19 @@ class SigningEngine:
             return result
 
         gender = card.gender or "1"
-        phone = card.phone or "13800000000"
+        # 之前: 默认 "13800000000" 占位电话直接进入生产健康卡接口.
+        # 现在: 缺少真实电话时记一条警告 (上游应配置真实电话).
+        phone = card.phone
+        if not phone:
+            phone = "13800000000"
+            try:
+                log(
+                    "  ⚠ 居民缺少手机号, 暂以占位号码 13800000000 提交 — "
+                    "请补充真实电话以避免数据被退回",
+                    "warn",
+                )
+            except Exception:
+                pass
 
         ok, msg = self.hc.create_resident_contract(
             person_id=person_id,
@@ -563,6 +702,378 @@ class SigningEngine:
     # ================================================================
     # Age bypass (SFZH modification via 3.0)
     # ================================================================
+
+    def check_age_bypass_eligibility(
+        self,
+        person_id: str,
+        name: str = "",
+        expected_sfzh: str = "",
+        province_password: str = "",
+    ) -> AgeBypassEligibility:
+        """读取 B0101 档案并启发式判断该居民是否可能允许 SFZH 修改。
+
+        **此方法仅做只读 GET, 不修改任何数据**.
+
+        判定优先级:
+          1. **(authoritative)** 若 ``province_password`` 提供, 优先调
+             ``ph3.query_province_wide`` — 服务端会显式返回 ``is_realname``
+             / ``is_visited`` (源自页面里 cell 的 title 与 onclick 属性).
+          2. **(heuristic)** 否则 ``ph3.load_archive`` 拿表单字段, 启发式
+             匹配 SMRZ/RZSJ/MFSJ 等字段名是否非空.
+
+        参数:
+          person_id        : 3.0 档案 GUID (B0101.GUID).
+          name             : 仅用于报告/审计行 (可选).
+          expected_sfzh    : 用作回退 SFZH 来源 (当档案里 SFZH 被脱敏时常见).
+          province_password: 当前 PH3 账号的登录密码; 用于走全省个案查询的
+                             权威路径. 不传则走启发式 fallback.
+        """
+        result = AgeBypassEligibility(person_id=person_id, name=name)
+
+        if not self.ph3:
+            result.error = "未配置 PH3Client"
+            return result
+
+        if not getattr(self.ph3, "fully_authenticated", False):
+            # fully_authenticated 在 ph3_api 里要求 logged_in + !qr_pending + org_code
+            # 缺任意一项, 我们不应该尝试拉档案 (会返回登录页 HTML).
+            if not getattr(self.ph3, "logged_in", False):
+                result.error = "3.0 系统未登录"
+            elif getattr(self.ph3, "qr_pending", False):
+                result.error = "登录不完整: 需要扫码完成二维码验证"
+            elif not getattr(self.ph3, "org_code", ""):
+                result.error = "登录不完整: 缺少机构编码 (请同步配置)"
+            else:
+                result.error = "3.0 客户端未就绪"
+            return result
+
+        # ---- 路径 1: 全省个案查询 (authoritative) ----
+        if province_password and expected_sfzh and hasattr(self.ph3, "query_province_wide"):
+            try:
+                matches, _total, qerr = self.ph3.query_province_wide(
+                    sfzh=expected_sfzh, password=province_password,
+                )
+            except Exception as e:
+                matches, qerr = [], "全省查询异常: %s" % e
+            if matches and not qerr:
+                # 命中: 用第一条 (按 SFZH 通常唯一)
+                m = matches[0]
+                result.archive_loaded = True
+                # 把权威 person_id 回写, 方便后续 modify_archive 直接用
+                if not result.person_id and m.person_id:
+                    result.person_id = m.person_id
+                result.original_sfzh = expected_sfzh
+                result.age = get_age_from_id(expected_sfzh)
+                result.needs_bypass = needs_age_bypass(expected_sfzh)
+                if m.is_realname:
+                    result.detected_realname_marks.append(
+                        "全省查询: 已通过实名制验证"
+                    )
+                if m.is_visited:
+                    result.detected_visited_marks.append(
+                        "全省查询: 已面访 (mf_click)"
+                    )
+                if not result.needs_bypass:
+                    result.likely_eligible = True
+                elif m.is_realname or m.is_visited:
+                    reasons = []
+                    if m.is_realname:
+                        reasons.append("已实名认证")
+                    if m.is_visited:
+                        reasons.append("已面访")
+                    result.likely_eligible = False
+                    result.block_reason = (
+                        "; ".join(reasons) + " (服务端权威标志) — SFZH 修改将被拒绝"
+                    )
+                else:
+                    result.likely_eligible = True
+                return result
+            # 全省查询无命中或失败 → fall through 走启发式
+
+        # ---- 路径 2: load_archive 启发式 fallback ----
+        ok, fields, err = self.ph3.load_archive(person_id)
+        if not ok:
+            result.error = err or "档案加载失败"
+            return result
+
+        result.archive_loaded = True
+        result.archive_fields = fields
+        # 优先用档案 SFZH; 当档案脱敏时回退到调用方提供的 SFZH.
+        sfzh_in_archive = (fields.get("SFZH") or "").strip()
+        if sfzh_in_archive and "*" not in sfzh_in_archive:
+            result.original_sfzh = sfzh_in_archive
+        elif expected_sfzh and len(expected_sfzh) == 18:
+            result.original_sfzh = expected_sfzh
+
+        if result.original_sfzh:
+            result.age = get_age_from_id(result.original_sfzh)
+            result.needs_bypass = needs_age_bypass(result.original_sfzh)
+        elif expected_sfzh:
+            result.age = get_age_from_id(expected_sfzh)
+            result.needs_bypass = needs_age_bypass(expected_sfzh)
+
+        # 启发式: 探测可能锁定 SFZH 的字段
+        for k, v in fields.items():
+            v_str = str(v or "").strip()
+            if not v_str:
+                continue
+            # 实名/认证类字段
+            if any(hint in k for hint in _REALNAME_FIELD_HINTS):
+                result.detected_realname_marks.append("%s=%s" % (k, v_str[:32]))
+            # 面访类字段
+            if any(hint in k for hint in _VISITED_FIELD_HINTS):
+                result.detected_visited_marks.append("%s=%s" % (k, v_str[:32]))
+
+        # 决策
+        if not result.needs_bypass:
+            # 18 岁以下或 60 岁以上, 健康卡平台不要求人脸 → 直接绑卡, 不需要绕行
+            result.likely_eligible = True
+            result.block_reason = "" if result.age >= 0 else "未能从档案提取年龄"
+        elif result.detected_realname_marks or result.detected_visited_marks:
+            result.likely_eligible = False
+            reasons = []
+            if result.detected_realname_marks:
+                reasons.append("已实名认证 (%s)" % "/".join(
+                    m.split("=")[0] for m in result.detected_realname_marks[:3]
+                ))
+            if result.detected_visited_marks:
+                reasons.append("已面访 (%s)" % "/".join(
+                    m.split("=")[0] for m in result.detected_visited_marks[:3]
+                ))
+            result.block_reason = "; ".join(reasons) + " — 服务端通常拒绝修改 SFZH"
+        else:
+            result.likely_eligible = True
+            result.block_reason = ""
+
+        return result
+
+    def batch_check_age_bypass_eligibility(
+        self,
+        targets: List[Dict[str, str]],
+        progress_cb: Optional[Callable[[int, int, AgeBypassEligibility], None]] = None,
+        province_password: str = "",
+    ) -> List[AgeBypassEligibility]:
+        """对多个居民批量做只读资格预检.
+
+        ``targets`` 每项至少含 ``person_id``; 可附 ``name`` / ``sfzh``.
+        失败的项会保留 ``error``, 不会中断整批.
+
+        ``province_password`` 若提供, 会走全省个案查询拿权威标志位.
+        """
+        results: List[AgeBypassEligibility] = []
+        total = len(targets)
+        for i, t in enumerate(targets, 1):
+            pid = t.get("person_id") or t.get("guid") or ""
+            sfzh = t.get("sfzh", "")
+            # 即使没有 person_id, 全省查询也能跑 (用 SFZH).
+            if not pid and not sfzh:
+                er = AgeBypassEligibility(name=t.get("name", ""))
+                er.error = "缺少 person_id 或 sfzh"
+                results.append(er)
+                if progress_cb:
+                    progress_cb(i, total, er)
+                continue
+            try:
+                r = self.check_age_bypass_eligibility(
+                    pid, name=t.get("name", ""),
+                    expected_sfzh=sfzh,
+                    province_password=province_password,
+                )
+            except Exception as e:
+                r = AgeBypassEligibility(person_id=pid, name=t.get("name", ""))
+                r.error = "预检异常: %s" % str(e)
+            results.append(r)
+            if progress_cb:
+                progress_cb(i, total, r)
+        return results
+
+    # ----------------------------------------------------------------
+    # Transactional age-bypass orchestration
+    # ----------------------------------------------------------------
+
+    def process_card_with_age_bypass(
+        self,
+        card: HealthCard,
+        person_id: str,
+        orgcode: str,
+        team_name: str = "",
+        team_guid: str = "",
+        doctor_name: str = "",
+        package_names: str = "",
+        package_guids: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period_years: str = "3",
+        auto_create: bool = True,
+        log_cb: Optional[Callable] = None,
+        audit_logger: Optional[object] = None,
+        force: bool = False,
+        province_password: str = "",
+    ) -> FullSignResult:
+        """对 18-60 岁居民: 修改 SFZH → 走完整签约 → 始终恢复 SFZH。
+
+        语义 (transactional):
+          - 步骤 A: 预检 -> 若 likely_blocked 且 force=False, 直接跳过 (不修改).
+          - 步骤 B: prepare_age_bypass (modify_archive SFZH+CSRQ).
+          - 步骤 C: process_card_full(card) — 该卡此时被服务端视为 <18 岁.
+          - 步骤 D: restore_age_bypass — 无论 C 成功失败都尝试恢复.
+            若 D 也失败, 将错误升级为 CRITICAL 写入审计 (因为档案残留了
+            一个不属于本人的 SFZH).
+
+        ``audit_logger`` 若提供, 应实现 ``log_attempt(event_dict)`` 方法
+        (见 ``batch_processor.AgeBypassAuditLogger``).
+        """
+
+        def log(msg, tag=""):
+            if log_cb:
+                log_cb(msg, tag)
+
+        result = FullSignResult(
+            success=False,
+            name=card.name,
+            health_card_id=card.health_card_id,
+            age_bypass_attempted=False,
+        )
+
+        sfzh = (card.id_card or "").strip()
+        if len(sfzh) != 18:
+            # 无法做绕行, fall back 到普通流程 (普通流程内部会因人脸要求而失败)
+            log("  无 18 位身份证号, 跳过年龄绕行预处理", "warn")
+            return self.process_card_full(
+                card, orgcode=orgcode, team_name=team_name, team_guid=team_guid,
+                doctor_name=doctor_name, package_names=package_names,
+                package_guids=package_guids, start_date=start_date,
+                end_date=end_date, period_years=period_years,
+                auto_create=auto_create, log_cb=log_cb,
+            )
+
+        if not needs_age_bypass(sfzh):
+            log("  非 18-60 岁人群, 直接走标准流程 (不需要绕行)", "info")
+            return self.process_card_full(
+                card, orgcode=orgcode, team_name=team_name, team_guid=team_guid,
+                doctor_name=doctor_name, package_names=package_names,
+                package_guids=package_guids, start_date=start_date,
+                end_date=end_date, period_years=period_years,
+                auto_create=auto_create, log_cb=log_cb,
+            )
+
+        # 步骤 A: 预检
+        elig = self.check_age_bypass_eligibility(
+            person_id, name=card.name, expected_sfzh=sfzh,
+            province_password=province_password,
+        )
+        result.age_bypass_attempted = True
+        if audit_logger:
+            try:
+                audit_logger.log_attempt({
+                    "phase": "precheck",
+                    "person_id": person_id, "name": card.name, "age": elig.age,
+                    "status": elig.status, "block_reason": elig.block_reason,
+                    "realname_marks": ",".join(elig.detected_realname_marks),
+                    "visited_marks": ",".join(elig.detected_visited_marks),
+                    "error": elig.error,
+                })
+            except Exception:
+                pass
+
+        if elig.error:
+            result.error = "档案预检失败: %s" % elig.error
+            result.step = "age_bypass_precheck"
+            result.age_bypass_blocked_reason = elig.error
+            log("  ✗ %s" % result.error, "err")
+            return result
+
+        if not elig.likely_eligible and not force:
+            result.error = "年龄绕行被预检阻断: %s" % elig.block_reason
+            result.step = "age_bypass_blocked"
+            result.age_bypass_blocked_reason = elig.block_reason
+            log("  ⊘ 跳过 (likely_blocked): %s" % elig.block_reason, "warn")
+            return result
+
+        # 步骤 B: prepare
+        ok, new_sfzh, err = self.prepare_age_bypass(person_id, sfzh, log_cb=log_cb)
+        if audit_logger:
+            try:
+                audit_logger.log_attempt({
+                    "phase": "prepare",
+                    "person_id": person_id, "name": card.name,
+                    "ok": ok,
+                    "error": err if not ok else "",
+                    "original_sfzh_tail": sfzh[-4:],
+                    "modified_sfzh_tail": (new_sfzh[-4:] if new_sfzh else ""),
+                })
+            except Exception:
+                pass
+        if not ok:
+            result.error = "修改档案失败 (服务端拒绝): %s" % err
+            result.step = "age_bypass_prepare"
+            result.age_bypass_blocked_reason = err
+            log("  ✗ %s" % result.error, "err")
+            return result
+        result.age_bypass_applied = True
+
+        # 步骤 C: 真实签约 — 在 SFZH 已被改为 <18 岁的窗口内
+        try:
+            inner = self.process_card_full(
+                card, orgcode=orgcode, team_name=team_name, team_guid=team_guid,
+                doctor_name=doctor_name, package_names=package_names,
+                package_guids=package_guids, start_date=start_date,
+                end_date=end_date, period_years=period_years,
+                auto_create=auto_create, log_cb=log_cb,
+            )
+        except Exception as e:
+            inner = FullSignResult(
+                success=False, name=card.name,
+                health_card_id=card.health_card_id,
+                error="签约异常: %s" % str(e),
+                step="exception",
+            )
+
+        # 复制内部结果字段到外层 (除了我们自己跟踪的 age_bypass_*)
+        for f in ("success", "step", "error", "elapsed", "contract_created",
+                  "contract_confirmed", "rpc_set", "previous_status"):
+            setattr(result, f, getattr(inner, f))
+        # 重新赋好 age_bypass_*
+        result.age_bypass_attempted = True
+        result.age_bypass_applied = True
+
+        # 步骤 D: 永远尝试恢复 SFZH (即使 C 失败)
+        try:
+            ok2, err2 = self.restore_age_bypass(person_id, sfzh, log_cb=log_cb)
+        except Exception as e:
+            ok2, err2 = False, "恢复异常: %s" % str(e)
+
+        result.age_bypass_restored = bool(ok2)
+        if audit_logger:
+            try:
+                audit_logger.log_attempt({
+                    "phase": "restore",
+                    "person_id": person_id, "name": card.name,
+                    "ok": ok2,
+                    "error": err2 if not ok2 else "",
+                    "outer_success": result.success,
+                })
+            except Exception:
+                pass
+
+        if not ok2:
+            # CRITICAL: 档案里现在留着改过的 SFZH (出生年=今年-10).
+            # 把这个事实粘到 error / step, 让上游强制人工处理.
+            critical = (
+                "[严重] SFZH 已修改但恢复失败 — 档案 %s 当前停留在伪造的 SFZH! "
+                "请立刻人工登录 3.0 系统手动恢复。错误: %s" % (person_id, err2)
+            )
+            log("  ✗✗✗ %s" % critical, "err")
+            if not result.error:
+                result.error = critical
+            else:
+                result.error = result.error + " | " + critical
+            if result.success:
+                # 即便签约成功了, 我们也不认它 — 数据完整性优先
+                result.success = False
+                result.step = "age_bypass_restore_failed"
+
+        return result
 
     def prepare_age_bypass(
         self,
@@ -634,6 +1145,287 @@ class SigningEngine:
 
         log("  ✗ 档案恢复失败: %s" % msg, "err")
         return False, msg
+
+    # ================================================================
+    # Auto-bind + sign (no-face population: <18 / >60)
+    # ================================================================
+
+    def bind_then_sign(
+        self,
+        name: str,
+        id_card: str,
+        orgcode: str,
+        wechatcode: str,
+        phone: str = "",
+        nation: str = "01",
+        relation: str = "6",
+        team_name: str = "",
+        team_guid: str = "",
+        doctor_name: str = "",
+        package_names: str = "",
+        package_guids: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period_years: str = "3",
+        log_cb: Optional[Callable] = None,
+    ) -> FullSignResult:
+        """免人脸人群 (<18 或 >60) 全自动: 绑卡 → 查询 → (建合同) → 确认。
+
+        关键约束 (来自 ``regist.js`` + 创意突破报告 v9):
+          * 健康卡注册页从 **身份证号内嵌出生年** 判断年龄;
+            ``age<18`` 或 ``age>60`` → **免腾讯人脸**, 仅需一个有效 ``Wechatcode``
+            (由抓包代理在微信打开健康卡页时捕获, 同一 code 可绑一整批)。
+          * ``18<=age<=60`` → 注册必须过腾讯人脸 (``verifyResult``), **无法纯自动
+            绑卡**; 此处诚实返回失败, 提示走人工绑卡 (或先做年龄绕行再人工绑)。
+
+        绑卡成功后复用既有 :meth:`process_card_full` (updateRpc→query→create→editqr)。
+        """
+
+        def log(msg, tag=""):
+            if log_cb:
+                log_cb(msg, tag)
+
+        res = FullSignResult(success=False, name=name)
+
+        sfzh = (id_card or "").strip()
+        if len(sfzh) != 18:
+            res.error = "需要 18 位身份证号才能绑卡"
+            res.step = "bind_input"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        age = get_age_from_id(sfzh)
+        if age < 0:
+            res.error = "无法从身份证号解析年龄 (可能被脱敏)"
+            res.step = "bind_input"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        if 18 <= age <= 60:
+            res.error = (
+                "18-60 岁绑卡需腾讯人脸验证 (verifyResult), 无法纯自动绑卡; "
+                "请人工在微信完成绑卡后再用本工具自动签约"
+            )
+            res.step = "bind_needs_face"
+            res.age_bypass_blocked_reason = res.error
+            log("  ⊘ %s" % res.error, "warn")
+            return res
+
+        if not wechatcode:
+            res.error = (
+                "缺少 Wechatcode — 请先在微信打开\"我的健康卡\"页, 由抓包代理捕获 "
+                "(同一 Wechatcode 可绑定一批最多 9 张卡)"
+            )
+            res.step = "bind_no_wechatcode"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        # 1. 绑卡 (免人脸)
+        log("  绑卡 (年龄 %d, 免人脸): %s" % (age, name), "info")
+        ok, msg = self.hc.register_health_card(
+            wechatcode=wechatcode, id_card=sfzh, name=name,
+            phone=phone or "", nation=nation, relation=relation,
+        )
+        if not ok:
+            res.error = "绑卡失败: %s" % msg
+            res.step = "bind"
+            log("  ✗ %s" % res.error, "err")
+            return res
+        log("  ✓ 健康卡已绑定: %s" % name, "ok")
+
+        # 2. 重新拉卡列表, 找到刚绑的卡 (按姓名 + 身份证尾号匹配)
+        card = None
+        for c in self.hc.get_card_list():
+            if c.name != name:
+                continue
+            cid = (c.id_card or "").strip()
+            if (not cid) or ("*" in cid) or (cid[-4:] == sfzh[-4:]):
+                card = c
+                break
+        if card is None:
+            res.error = "绑卡后未在卡列表中找到该卡 (稍后可重试)"
+            res.step = "bind_relist"
+            log("  ✗ %s" % res.error, "err")
+            return res
+
+        # 3. 复用完整签约流程
+        inner = self.process_card_full(
+            card, orgcode=orgcode, team_name=team_name, team_guid=team_guid,
+            doctor_name=doctor_name, package_names=package_names,
+            package_guids=package_guids, start_date=start_date,
+            end_date=end_date, period_years=period_years,
+            auto_create=True, log_cb=log_cb,
+        )
+        if not inner.name:
+            inner.name = name
+        return inner
+
+    # ================================================================
+    # Household-head application (户主代申请) — sign every family member
+    # bound under ONE head-of-household openid, in one pass.
+    # ================================================================
+    #
+    # 机制依据 (对方内部聊天截图 + 本仓库 ph3_status6 探针报告互相印证):
+    #   * "居民申请(STATUS=6)" 只能由居民端 (健康卡/微信) 经 insertJtysqy 产生;
+    #     公卫医生端只能产出 STATUS=5, 且 5 无法被确认成已签约.
+    #   * 微信"我的健康卡"里, 户主可以给"自己户口下面的人"批量申请家庭签约
+    #     (隐藏入口). 在本平台上, 这等价于: 家庭成员的健康卡都绑在同一个
+    #     户主 openid 下 (newlist 一次性返回全部), 而 insertJtysqy / editqr
+    #     全程使用户主的 openid (self.hc.openid) 对每张成员卡发起 + 确认.
+    #   * 因此 "户主代申请" 不需要给每个人单独绑卡/过人脸 —— 一个户主 openid
+    #     覆盖一整户. 绑定数量按"户"算, 不按"人"算.
+    #
+    # 诚实边界: 成员卡必须已绑定到该户主 openid 下 (家庭关系由平台维护).
+    # 绑定本身仍受"真实微信凭据 + 18-60 需人脸"约束 (见 bind_then_sign);
+    # 本方法只负责"已在户下的成员"的批量签约/确认, 不伪造家庭关系.
+
+    def list_household_members(self) -> List[HealthCard]:
+        """列出户主 openid 名下绑定的全部家庭成员健康卡 (newlist)。
+
+        返回的每张卡含 ``relation`` (与户主的关系) 与 ``age`` 等字段,
+        供 UI / 报告展示 "这一户有哪些人"。未连接时返回空列表。
+        """
+        if not self.hc.connected:
+            return []
+        return self.hc.get_card_list()
+
+    def process_household(
+        self,
+        orgcode: str,
+        team_name: str = "",
+        team_guid: str = "",
+        doctor_name: str = "",
+        package_names: str = "",
+        package_guids: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        period_years: str = "3",
+        auto_create: bool = True,
+        members: Optional[List[HealthCard]] = None,
+        relation_filter: Optional[Callable[[HealthCard], bool]] = None,
+        delay: float = 0.5,
+        log_cb: Optional[Callable] = None,
+        progress_cb: Optional[Callable] = None,
+        stop_check: Optional[Callable] = None,
+    ) -> HouseholdSignResult:
+        """户主代申请: 对户主 openid 名下绑定的全部家庭成员逐人签约+确认。
+
+        每位成员都复用 :meth:`process_card_full`
+        (updateRpc → query → insertJtysqy(STATUS=6) → editqr 确认),
+        且全程使用同一个户主 ``openid``, 无需为成员逐人绑卡/过人脸。
+
+        参数:
+          members          : 显式给定成员卡列表; 缺省则调 newlist 自动拉取。
+          relation_filter  : 可选过滤器, 返回 True 才处理该成员
+                             (例如只签未成年/老人, 或排除户主本人)。
+          其余参数语义同 :meth:`process_card_full`。
+
+        返回 :class:`HouseholdSignResult` 聚合结果。
+        """
+
+        def log(msg, tag=""):
+            if log_cb:
+                log_cb(msg, tag)
+
+        summary = HouseholdSignResult(openid=getattr(self.hc, "openid", ""))
+
+        if not self.hc.connected:
+            summary.error = "未连接健康卡平台 (请先用户主 openid 连接)"
+            log("  ✗ %s" % summary.error, "err")
+            return summary
+
+        if members is None:
+            members = self.list_household_members()
+
+        if not members:
+            summary.error = (
+                "户主 openid 名下未查到任何健康卡 — "
+                "请确认该 openid 已在微信绑定本人及家庭成员的健康卡"
+            )
+            log("  ✗ %s" % summary.error, "err")
+            return summary
+
+        # 记录户主姓名 (取关系标记为本人/户主的那张, 否则第一张)
+        for c in members:
+            rel = (c.relation or "").strip()
+            if rel in ("本人", "户主", "0", "1", "6"):
+                summary.head_name = c.name
+                break
+        if not summary.head_name and members:
+            summary.head_name = members[0].name
+
+        if relation_filter is not None:
+            members = [c for c in members if relation_filter(c)]
+            if not members:
+                summary.error = "按关系过滤后无可处理的家庭成员"
+                log("  ⊘ %s" % summary.error, "warn")
+                return summary
+
+        summary.total = len(members)
+        log(
+            "  户主 [%s] 名下家庭成员 %d 人, 开始代申请签约"
+            % (summary.head_name or "?", summary.total),
+            "info",
+        )
+
+        for i, card in enumerate(members):
+            if stop_check and stop_check():
+                log("  ⊘ 用户中止, 已处理 %d/%d" % (i, summary.total), "warn")
+                break
+
+            rel = (card.relation or "").strip()
+            log(
+                "处理 [%d/%d] %s%s"
+                % (
+                    i + 1, summary.total, card.name,
+                    " (与户主关系: %s)" % rel if rel else "",
+                ),
+                "info",
+            )
+
+            r = self.process_card_full(
+                card,
+                orgcode=orgcode,
+                team_name=team_name,
+                team_guid=team_guid,
+                doctor_name=doctor_name,
+                package_names=package_names,
+                package_guids=package_guids,
+                start_date=start_date,
+                end_date=end_date,
+                period_years=period_years,
+                auto_create=auto_create,
+                log_cb=log_cb,
+            )
+            summary.results.append(r)
+
+            if r.success:
+                summary.succeeded += 1
+                if r.step == "already_signed":
+                    summary.already_signed += 1
+                if r.contract_confirmed:
+                    summary.confirmed += 1
+                if r.contract_created:
+                    summary.created += 1
+            else:
+                summary.failed += 1
+
+            if progress_cb:
+                progress_cb(i, summary.total, r)
+
+            if delay > 0 and i < summary.total - 1:
+                time.sleep(delay)
+
+        log(
+            "  户 [%s] 完成: 共 %d 人, 成功 %d (确认 %d / 新建 %d / 已签 %d), 失败 %d"
+            % (
+                summary.head_name or "?", summary.total, summary.succeeded,
+                summary.confirmed, summary.created, summary.already_signed,
+                summary.failed,
+            ),
+            "ok" if summary.success else "warn",
+        )
+        return summary
 
     # ================================================================
     # Batch processing
