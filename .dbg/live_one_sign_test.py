@@ -27,8 +27,8 @@ sys.path.insert(0, ROOT)
 from live_full_test import do_qr_flow, banner, mask_sfzh, mask_name  # noqa: E402
 from ph3_api import PH3Client  # noqa: E402
 
-ACCOUNT = os.environ.get("PH3_ACCOUNT", "431122012")
-PASSWORD = os.environ.get("PH3_PASSWORD", "wei1147609775@")
+ACCOUNT = os.environ.get("PH3_ACCOUNT", "")
+PASSWORD = os.environ.get("PH3_PASSWORD", "")
 GGWS = "https://ggws.hnhfpc.gov.cn"
 CONFIRM_WRITE = os.environ.get("CONFIRM_WRITE") == "1"
 DO_PROMOTE = os.environ.get("DO_PROMOTE", "1") == "1"

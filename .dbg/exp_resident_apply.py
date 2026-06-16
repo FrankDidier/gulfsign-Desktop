@@ -32,8 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ph3_api import PH3Client  # noqa: E402
 
 BASE = "https://ggws.hnhfpc.gov.cn"
-ACCOUNT = "431122012"
-PASSWORD = "wei1147609775@"
+ACCOUNT = ""
+PASSWORD = ""
 QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qr_login.png")
 APPLICANT_STATUS = os.environ.get("APPLICANT_STATUS", "6")
 KEEP = os.environ.get("KEEP") == "1"

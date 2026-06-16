@@ -20,8 +20,8 @@ import traceback
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-ACCOUNT = os.environ.get("PH3_ACCOUNT", "431122012")
-PASSWORD = os.environ.get("PH3_PASSWORD", "wei1147609775@")
+ACCOUNT = os.environ.get("PH3_ACCOUNT", "")
+PASSWORD = os.environ.get("PH3_PASSWORD", "")
 GGWS = "https://ggws.hnhfpc.gov.cn"
 QR_DIR = os.path.join(ROOT, ".dbg")
 QR_PATH = os.path.join(QR_DIR, "live_qr.png")

@@ -25,8 +25,8 @@ from pathlib import Path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-ACCOUNT = "431122012"
-PASSWORD = "wei1147609775@"
+ACCOUNT = ""
+PASSWORD = ""
 GGWS = "https://ggws.hnhfpc.gov.cn"
 
 
@@ -320,8 +320,8 @@ def feature_5_logging():
             "agreement": "2026-05-31 至 2027-05-30",
             "doctor": "张医生",
         }
-        f1 = sl.log_success(account="431122012", result_data=record1)
-        f2 = sl.log_success(account="431122012", result_data=record2)
+        f1 = sl.log_success(account="", result_data=record1)
+        f2 = sl.log_success(account="", result_data=record2)
 
         if f1 != f2:
             err("成功日志路径不一致: %s vs %s" % (f1, f2))
@@ -349,7 +349,7 @@ def feature_5_logging():
         ok("按日期分目录结构正确: logs/成功/%s/*.xlsx (%d files)"
            % (date_str, len(files)))
 
-        logs = sl.get_success_logs(account="431122012")
+        logs = sl.get_success_logs(account="")
         if len(logs) < 2:
             err("get_success_logs() 应返回 ≥2 条, 实际 %d" % len(logs))
             return False

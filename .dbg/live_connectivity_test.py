@@ -18,8 +18,8 @@ import traceback
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-ACCOUNT = "431122012"
-PASSWORD = "wei1147609775@"
+ACCOUNT = ""
+PASSWORD = ""
 GGWS = "https://ggws.hnhfpc.gov.cn"
 
 

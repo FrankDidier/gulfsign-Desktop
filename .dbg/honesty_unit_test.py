@@ -105,18 +105,18 @@ def test_success_logger_failure_path():
             failure_log_dir=str(Path(tmp) / "logs" / "失败"),
         )
         ok_path = sl.log_success(
-            account="431122012",
+            account="",
             result_data={"name": "张三", "person_id": "p1"},
         )
         fail_path = sl.log_failure(
-            account="431122012",
+            account="",
             result_data={"name": "李四", "person_id": "p2", "step": "confirm"},
             error="服务器返回 opType=1",
         )
         assert "成功" in ok_path and ok_path.endswith(".xlsx")
         assert "失败" in fail_path and fail_path.endswith(".xlsx")
-        ok_rows = sl.get_success_logs(account="431122012")
-        fail_rows = sl.get_failure_logs(account="431122012")
+        ok_rows = sl.get_success_logs(account="")
+        fail_rows = sl.get_failure_logs(account="")
         assert any(r.get("name") == "张三" for r in ok_rows), ok_rows
         assert any(r.get("name") == "李四" for r in fail_rows), fail_rows
         print(f"[ok] SuccessLogger writes both 成功 & 失败 ({ok_path}, {fail_path})")
@@ -169,8 +169,8 @@ def test_check_login_status_missing_orgcode():
         app.client.logged_in = True
         app.client.qr_pending = False
         app.client.org_code = ""  # 关键: 没拿到机构代码
-        app._cfg = {"username": "431122012"}
-        app.enhanced_account_var = tk.StringVar(value="431122012")
+        app._cfg = {"username": ""}
+        app.enhanced_account_var = tk.StringVar(value="")
         app.enhanced_url_var = tk.StringVar(value="https://ggws.hnhfpc.gov.cn")
 
         ok, msg, detail = GulfSignApp._check_login_status(app)

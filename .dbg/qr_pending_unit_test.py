@@ -64,8 +64,8 @@ def test_app_check_login_status_qr_pending():
         app.client = PH3Client()
         app.client.logged_in = True
         app.client.qr_pending = True
-        app._cfg = {"username": "431122012"}
-        app.enhanced_account_var = tk.StringVar(value="431122012")
+        app._cfg = {"username": ""}
+        app.enhanced_account_var = tk.StringVar(value="")
         app.enhanced_url_var = tk.StringVar(value="https://ggws.hnhfpc.gov.cn")
 
         ok, msg, detail = GulfSignApp._check_login_status(app)

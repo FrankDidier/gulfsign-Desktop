@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""【闭环验证】居民端已造出一个"居民申请(6)"(魏忠忠), 现在用医生账号确认它 → 看是否变"已签约"。
+"""【闭环验证】居民端已造出一个"居民申请(6)"(目标人 TARGET_NAME), 现在用医生账号确认它 → 看是否变"已签约"。
 
 这一步【不创建新数据】, 只确认刚才居民端真实发起的那一条。
 若成功 = 整条链路打通:
@@ -15,12 +15,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ph3_api import PH3Client  # noqa: E402
 
-BASE = "https://ggws.hnhfpc.gov.cn"
-ACCOUNT = "431122012"
-PASSWORD = "wei1147609775@"
+BASE = os.environ.get("BASE", "https://ggws.hnhfpc.gov.cn")
+ACCOUNT = os.environ.get("ACCOUNT", "")
+PASSWORD = os.environ.get("PASSWORD", "")
 QR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qr_login.png")
-TARGET_NAME = os.environ.get("TARGET_NAME", "魏忠忠")
-SUBORG = os.environ.get("SUBORG", "431122100002004")
+TARGET_NAME = os.environ.get("TARGET_NAME", "")
+SUBORG = os.environ.get("SUBORG", "")
+
+if not (ACCOUNT and PASSWORD and TARGET_NAME):
+    sys.exit("请先设置环境变量 ACCOUNT / PASSWORD / TARGET_NAME (可选 SUBORG) 再运行。")
 
 
 def banner(t):
@@ -76,7 +79,11 @@ def do_login(c):
 
 
 def find_target(c):
-    """在医生可见范围里找到 TARGET_NAME 的【居民申请(6)】。返回 Patient 或 None。"""
+    """在医生可见范围里找【居民申请(6)】。优先 TARGET_NAME, 否则取第一条。
+    返回 (Patient 或 None, all_seen列表)。"""
+    first = None
+    seen = []
+    seen_keys = set()
     for oc in (c.org_code, SUBORG, ""):
         for page in (1, 2, 3):
             try:
@@ -87,11 +94,17 @@ def find_target(c):
             print("查居民申请(6) oc=%s page=%s -> %d 人 (total=%s)" % (
                 oc or "(默认)", page, len(pts), total))
             for p in pts:
+                key = (p.person_id, p.contract_code)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    seen.append(p)
+                if first is None:
+                    first = p
                 if p.name == TARGET_NAME:
-                    return p
+                    return p, seen
             if len(pts) < 1 or page * 20 >= int(total or 0):
                 break
-    return None
+    return first, seen
 
 
 def main():
@@ -100,17 +113,22 @@ def main():
         print("\n登录未完成, 中止。")
         return
 
-    banner("找 %s 的居民申请(6)" % TARGET_NAME)
-    p = find_target(c)
+    banner("找居民申请(6) (优先 %s, 否则取第一条)" % TARGET_NAME)
+    p, seen = find_target(c)
     if not p:
-        print(">>> 没在居民申请(6)列表里找到 %s。" % TARGET_NAME)
-        print(">>> 可能在别的机构/分页, 或 ggws 侧还没同步。打印第1页看看:")
-        pts, _ = c.query_patients(status="6", page=1)
-        for x in pts[:20]:
-            print("   ", x.name, "person_id=", x.person_id, "cc=", x.contract_code)
+        print(">>> 居民申请(6)列表为空: 医生可见范围内没有待确认的居民申请。")
+        print(">>> 需要先有人在居民端(健康卡/微信)发起申请, 或换机构再试。")
         return
 
-    print("找到: %s person_id=%s contract=%s status=%s" % (
+    if seen:
+        print("可见的居民申请(6)共 %d 条:" % len(seen))
+        for x in seen[:20]:
+            mark = " <= 选它" if (x.person_id == p.person_id
+                                  and x.contract_code == p.contract_code) else ""
+            print("   %s person_id=%s cc=%s%s" % (
+                x.name, x.person_id, x.contract_code, mark))
+
+    print("\n将确认: %s person_id=%s contract=%s status=%s" % (
         p.name, p.person_id, p.contract_code, p.status_text))
 
     banner("发起前: 读该人签约记录")
