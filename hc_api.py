@@ -350,14 +350,21 @@ class HealthCardClient:
             return info.get("GUID", "")
         return None
 
-    def query_teams(self, orgcode: str) -> List[dict]:
-        """List signing teams for an org via querygroup."""
+    def query_teams(self, orgcode: str, health_card_id: str = "") -> List[dict]:
+        """List signing teams for an org via querygroup.
+
+        平台要求带 ``healthCardId`` 授权上下文, 否则返回
+        ``errno=1 卡列表中未读取到信息``。
+        """
         if not self.connected:
             return []
         try:
+            params = {"action": "querygroup", "orgcode": orgcode}
+            if health_card_id:
+                params["healthCardId"] = health_card_id
             r = self.session.get(
                 self._jkxb_url(),
-                params={"action": "querygroup", "orgcode": orgcode},
+                params=params,
                 headers=self._jkxb_headers(),
                 timeout=self._timeout,
             )
@@ -370,9 +377,13 @@ class HealthCardClient:
             return []
 
     def query_service_packages(
-        self, orgcode: str, population_type: str = ""
+        self, orgcode: str, population_type: str = "", health_card_id: str = ""
     ) -> List[dict]:
-        """List service packages for an org via queryservicepackge."""
+        """List service packages for an org via queryservicepackge.
+
+        平台要求带 ``healthCardId`` 授权上下文, 否则返回
+        ``errno=1 卡列表中未读取到信息``。
+        """
         if not self.connected:
             return []
         try:
@@ -383,6 +394,8 @@ class HealthCardClient:
             }
             if population_type:
                 params["b0110_07"] = population_type
+            if health_card_id:
+                params["healthCardId"] = health_card_id
             r = self.session.get(
                 self._jkxb_url(), params=params,
                 headers=self._jkxb_headers(), timeout=self._timeout,

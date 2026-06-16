@@ -276,7 +276,7 @@ class SigningEngine:
     # ================================================================
 
     def resolve_team(
-        self, orgcode: str, team_name: str = "",
+        self, orgcode: str, team_name: str = "", health_card_id: str = "",
     ) -> Tuple[str, str]:
         """Find a team GUID+name for the given org.
 
@@ -284,7 +284,7 @@ class SigningEngine:
         Returns (team_guid, team_name).
         """
         if orgcode not in self._cached_teams:
-            teams = self.hc.query_teams(orgcode)
+            teams = self.hc.query_teams(orgcode, health_card_id)
             if not teams and self.ph3 and self.ph3.logged_in:
                 teams = self._teams_from_ph3()
             self._cached_teams[orgcode] = teams
@@ -293,17 +293,20 @@ class SigningEngine:
         if not teams:
             return "", team_name
 
+        def _tname(t: dict) -> str:
+            return (t.get("name") or t.get("B0107_01") or t.get("qytdmc")
+                    or t.get("b0105_03") or "")
+
+        def _tguid(t: dict) -> str:
+            return t.get("guid") or t.get("GUID") or t.get("id") or ""
+
         for t in teams:
-            t_name = t.get("name", t.get("qytdmc", t.get("b0105_03", "")))
-            t_guid = t.get("guid", t.get("GUID", t.get("id", "")))
-            if team_name and team_name in t_name:
-                return t_guid, t_name
+            t_name = _tname(t)
+            if team_name and t_name and team_name in t_name:
+                return _tguid(t), t_name
 
         first = teams[0]
-        return (
-            first.get("guid", first.get("GUID", first.get("id", ""))),
-            team_name or first.get("name", first.get("qytdmc", "")),
-        )
+        return _tguid(first), (team_name or _tname(first))
 
     def _teams_from_ph3(self) -> List[dict]:
         """Load teams from the 3.0 system's signing form (fallback)."""
@@ -336,7 +339,7 @@ class SigningEngine:
         return []
 
     def resolve_packages(
-        self, orgcode: str, population_type: str = "",
+        self, orgcode: str, population_type: str = "", health_card_id: str = "",
     ) -> Tuple[str, str]:
         """Find service packages for the given org.
 
@@ -345,7 +348,8 @@ class SigningEngine:
         """
         cache_key = "%s|%s" % (orgcode, population_type)
         if cache_key not in self._cached_packages:
-            pkgs = self.hc.query_service_packages(orgcode, population_type)
+            pkgs = self.hc.query_service_packages(
+                orgcode, population_type, health_card_id)
             if pkgs:
                 guids = ",".join(
                     p.get("guid", p.get("GUID", "")) for p in pkgs
@@ -586,7 +590,8 @@ class SigningEngine:
             end_date = str(int(start_date[:4]) + yrs) + start_date[4:]
 
         if not team_guid and orgcode:
-            team_guid, team_name = self.resolve_team(orgcode, team_name)
+            team_guid, team_name = self.resolve_team(
+                orgcode, team_name, card.health_card_id)
             if team_name:
                 log("  签约团队: %s" % team_name, "info")
 
@@ -601,7 +606,8 @@ class SigningEngine:
             return result
 
         if not package_guids and orgcode:
-            package_guids, package_names = self.resolve_packages(orgcode)
+            package_guids, package_names = self.resolve_packages(
+                orgcode, "", card.health_card_id)
             if package_names:
                 log("  服务包: %s" % package_names[:60], "info")
 
