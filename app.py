@@ -5,6 +5,7 @@
 """
 import os
 import sys
+import re
 import json
 import time
 import threading
@@ -21,7 +22,9 @@ if getattr(sys, "frozen", False):
     if _bundle_dir not in sys.path:
         sys.path.insert(0, _bundle_dir)
 
-from ph3_api import PH3Client, Patient, ProvinceMatch, SignResult, POPULATION_TYPES
+from ph3_api import (
+    PH3Client, Patient, ProvinceMatch, SignResult, POPULATION_TYPES, PH3Crypto,
+)
 from hc_api import HealthCardClient, HealthCard, HCContract, HCConfirmResult
 from sign_engine import (
     SigningEngine, FullSignResult, AgeBypassEligibility,
@@ -643,6 +646,7 @@ class GulfSignApp(tk.Tk):
         tab5 = ttk.Frame(self.notebook, padding=4)
         tab6 = ttk.Frame(self.notebook, padding=4)
         tab7 = ttk.Frame(self.notebook, padding=4)
+        tab8 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
@@ -651,6 +655,8 @@ class GulfSignApp(tk.Tk):
         self.notebook.add(tab4, text=" 流量抓包 ")
         self.notebook.add(tab6, text=" 状态取证 ")
         self.notebook.add(tab5, text=" 许可证配置 ")
+        # 追加在最后, 避免改动既有标签索引 (有代码按固定下标 select)。
+        self.notebook.add(tab8, text=" 签约门路探测 ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
@@ -659,6 +665,7 @@ class GulfSignApp(tk.Tk):
         self._build_capture_tab(tab4)
         self._build_diag_tab(tab6)
         self._build_license_tab(tab5)
+        self._build_probe_tab(tab8)  # 依赖登录区变量, 故最后构建
 
     # ================================================================
     # Tab 1: 3.0系统签约
@@ -3276,6 +3283,516 @@ class GulfSignApp(tk.Tk):
 
     def _open_sc_dir(self):
         d = self._sc_base_dir()
+        try:
+            if sys.platform == "darwin":
+                import subprocess
+                subprocess.run(["open", d])
+            elif sys.platform == "win32":
+                os.startfile(d)  # type: ignore[attr-defined]
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", d])
+        except Exception:
+            messagebox.showinfo("目录", d)
+
+    # ================================================================
+    # Tab 8: 签约门路探测 (找"医生直接造居民申请6"的接口/字段)
+    #   - 阶段A 只读: 抓真实 居民申请(6) / 医生申请(5) 的字段并对比
+    #   - 阶段B 写入试探(可选): 候选字段试探 + 自动确认 + 用完即删
+    # 凭据全部来自登录区(动态), 不写死任何账号/机构/团队/电话。
+    # ================================================================
+
+    def _p6_base_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        d = os.path.join(base, "logs", "签约门路探测")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _build_probe_tab(self, parent):
+        self._p6_logfile = None
+        self._p6_busy = False
+
+        guide = ttk.LabelFrame(parent, text=" 说明（这一页帮我们找出『医生直接造居民申请』的门路）", padding=8)
+        guide.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(guide, justify=tk.LEFT, foreground="#374151", text=(
+            "目标：找出『用医生身份直接把人变成居民申请(6)』的接口/字段（对方团队会这一手）。\n"
+            "找到后，配合本程序已跑通的『确认→已签约』，即可批量签约。\n"
+            "\n"
+            "用法（按顺序）：\n"
+            "  ① 在下面填账号/密码 → 点【登录并扫码】→ 手机扫码，状态变『已登录』；\n"
+            "  ② 点【① 只读诊断】：自动抓一条真实居民申请(6)和一条医生申请(5)，\n"
+            "     对比它们字段差异（全程只读，不改任何数据）；\n"
+            "  ③ 把【导出日志（打包）】生成的文件发给我们；我们据此锁定那个字段。\n"
+            "  ④ 进阶（可选）：拿到一个『可反复删除的测试对象』后，再用【② 写入试探】验证。"
+        )).pack(anchor=tk.W)
+
+        # --- 登录区(复用 3.0 登录变量, 在本页也能直接登录扫码) ---
+        login = ttk.LabelFrame(parent, text=" 登录（与「3.0系统签约」共用同一登录） ", padding=8)
+        login.pack(fill=tk.X, pady=(0, 6))
+        r1 = ttk.Frame(login)
+        r1.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(r1, text="账号：").pack(side=tk.LEFT)
+        ttk.Entry(r1, textvariable=self.enhanced_api_account_var, width=20).pack(
+            side=tk.LEFT, padx=(0, 8))
+        ttk.Label(r1, text="密码：").pack(side=tk.LEFT)
+        ttk.Entry(r1, textvariable=self.enhanced_api_password_var, width=20,
+                  show="*").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(r1, text="登录并扫码", command=self._p6_login_now).pack(
+            side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r1, text="📱 扫码补登", command=self._on_manual_qr_login).pack(
+            side=tk.LEFT, padx=(0, 6))
+        r2 = ttk.Frame(login)
+        r2.pack(fill=tk.X)
+        ttk.Label(r2, text="登录状态：").pack(side=tk.LEFT)
+        self.var_p6_login = tk.StringVar(value="未登录")
+        ttk.Label(r2, textvariable=self.var_p6_login,
+                  foreground="#2563eb").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(r2, text="刷新登录状态", command=self._p6_refresh_status).pack(
+            side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r2, text="去「3.0系统签约」登录页",
+                   command=lambda: self.notebook.select(0)).pack(side=tk.LEFT)
+
+        # --- 阶段A 只读诊断 ---
+        a = ttk.Frame(parent)
+        a.pack(fill=tk.X, pady=(0, 4))
+        self.btn_p6_diag = ttk.Button(
+            a, text="① 只读诊断：抓 居民申请(6)/医生申请(5) 字段对比",
+            command=self._on_p6_diagnose)
+        self.btn_p6_diag.pack(side=tk.LEFT, padx=(0, 8))
+        self.var_p6_status = tk.StringVar(value="待操作")
+        ttk.Label(a, textvariable=self.var_p6_status,
+                  foreground="#6b7280").pack(side=tk.LEFT)
+
+        # --- 阶段B 写入试探(高级·可选) ---
+        b = ttk.LabelFrame(
+            parent, text=" ② 写入试探（高级·可选；会新建并随即删除测试合同） ",
+            padding=8)
+        b.pack(fill=tk.X, pady=(4, 6))
+        ttk.Label(b, justify=tk.LEFT, foreground="#b45309", text=(
+            "仅在你有一个『可反复新建/删除签约的测试对象』时使用。本功能会就该 1 人\n"
+            "尝试若干候选写法，每条试探合同【用完立即删除】，不影响其他人。")).pack(
+            anchor=tk.W, pady=(0, 4))
+        b1 = ttk.Frame(b)
+        b1.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(b1, text="测试对象 PERSONID：").pack(side=tk.LEFT)
+        self.var_p6_pid = tk.StringVar()
+        ttk.Entry(b1, textvariable=self.var_p6_pid, width=24).pack(
+            side=tk.LEFT, padx=(0, 8))
+        ttk.Label(b1, text="服务电话：").pack(side=tk.LEFT)
+        self.var_p6_phone = tk.StringVar()
+        ttk.Entry(b1, textvariable=self.var_p6_phone, width=16).pack(
+            side=tk.LEFT, padx=(0, 8))
+        b2 = ttk.Frame(b)
+        b2.pack(fill=tk.X)
+        self.var_p6_ack = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            b2, variable=self.var_p6_ack,
+            text="我确认这是测试对象，允许新建并自动删除其签约记录").pack(side=tk.LEFT)
+        self.btn_p6_sweep = ttk.Button(
+            b2, text="运行写入试探（用完即删）", command=self._on_p6_sweep)
+        self.btn_p6_sweep.pack(side=tk.LEFT, padx=(12, 0))
+
+        # --- 导出 / 打开目录 ---
+        row = ttk.Frame(parent)
+        row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(row, text="导出日志（打包发给我们）",
+                   command=self._p6_export).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(row, text="打开日志目录",
+                   command=self._open_p6_dir).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(row, text="（日志/原始数据保存在 logs/签约门路探测/ 下）",
+                  foreground="gray").pack(side=tk.LEFT)
+
+        # --- 日志 ---
+        out = ttk.LabelFrame(parent, text=" 日志 ", padding=4)
+        out.pack(fill=tk.BOTH, expand=True)
+        inner = ttk.Frame(out)
+        inner.pack(fill=tk.BOTH, expand=True)
+        self.p6_text = tk.Text(
+            inner, wrap=tk.WORD, state=tk.DISABLED,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 11))
+        scb = ttk.Scrollbar(inner, command=self.p6_text.yview)
+        self.p6_text.configure(yscrollcommand=scb.set)
+        self.p6_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scb.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (("ok", "#16a34a"), ("err", "#dc2626"),
+                           ("info", "#2563eb"), ("warn", "#d97706")):
+            self.p6_text.tag_configure(tag, foreground=color)
+        ttk.Button(out, text="清空", command=self._p6_clear).pack(
+            side=tk.RIGHT, pady=(2, 0))
+
+        self._p6_refresh_status()
+
+    # ---- 日志/状态基础设施 ----
+    def _p6_clear(self):
+        self.p6_text.configure(state=tk.NORMAL)
+        self.p6_text.delete("1.0", tk.END)
+        self.p6_text.configure(state=tk.DISABLED)
+
+    def _p6_logpath(self) -> str:
+        if not getattr(self, "_p6_logfile", None):
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._p6_logfile = os.path.join(
+                self._p6_base_dir(), "签约门路探测_%s.log" % ts)
+        return self._p6_logfile
+
+    def _p6_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.p6_text.configure(state=tk.NORMAL)
+            self.p6_text.insert(tk.END, line, tag)
+            self.p6_text.see(tk.END)
+            self.p6_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+        try:
+            with open(self._p6_logpath(), "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _p6_refresh_status(self):
+        fully = bool(getattr(self.client, "fully_authenticated", False))
+        if fully:
+            self.var_p6_login.set(
+                "已登录（机构=%s 医生=%s）" % (
+                    getattr(self.client, "org_code", "") or "?",
+                    getattr(self.client, "doctor_name", "") or "?"))
+        elif getattr(self.client, "qr_pending", False):
+            self.var_p6_login.set("待扫码：请用手机扫码完成登录")
+        elif getattr(self.client, "logged_in", False):
+            self.var_p6_login.set("已登录但缺机构信息，请点【刷新登录状态】或重新登录")
+        else:
+            self.var_p6_login.set("未登录")
+
+    def _p6_login_now(self):
+        # 复用 3.0 登录流程: API 登录会自动弹出二维码扫码窗口。
+        try:
+            self._perform_api_login()
+        except Exception as e:
+            messagebox.showerror("登录失败", str(e))
+        self._p6_refresh_status()
+
+    def _p6_check_login(self) -> bool:
+        if not getattr(self.client, "fully_authenticated", False):
+            self._p6_log("请先在上方登录并扫码成功（状态显示『已登录』）后再操作。", "err")
+            messagebox.showwarning(
+                "未登录", "请先在本页上方填写账号/密码 → 点【登录并扫码】→ 手机扫码完成。")
+            return False
+        return True
+
+    # ---- 阶段A: 只读字段诊断 ----
+    def _p6_raw_personal(self, pid: str) -> str:
+        try:
+            resp = self.client.session.get(
+                self.client._url("/Sys_JCWS/JKDA/Do_Query_Handler.ashx"),
+                params={"action": "B0105", "PAGENO": "1", "PERSONID": pid,
+                        "n": str(int(time.time() * 1000))},
+                timeout=self.client._timeout)
+            return resp.text if resp.status_code == 200 else ""
+        except Exception as e:
+            self._p6_log("  读取 %s 记录异常: %s" % (pid, e), "warn")
+            return ""
+
+    @staticmethod
+    def _p6_parse_rows(raw: str) -> List[Dict]:
+        body = raw.split("@@")[0]
+        out = []
+        for m in re.finditer(r'<row\s+id="([^"]+)"([^>]*)>(.*?)</row>',
+                             body, re.DOTALL):
+            attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(2)))
+            cells = re.findall(r"<cell[^>]*>(.*?)</cell>", m.group(3), re.DOTALL)
+            cells = [re.sub(r"<[^>]+>", "", x).strip() for x in cells]
+            out.append({"cc": m.group(1), "attrs": attrs, "cells": cells})
+        return out
+
+    def _p6_scan(self, status: str, max_n: int = 20) -> List[Patient]:
+        seen, out = set(), []
+        oc = getattr(self.client, "org_code", "") or ""
+        for ocx in ([oc, ""] if oc else [""]):
+            for page in range(1, 6):
+                try:
+                    pts, total = self.client.query_patients(
+                        status=status, org_code=ocx, page=page)
+                except Exception as e:
+                    self._p6_log("  查询异常(状态=%s,机构=%s,第%d页): %s" % (
+                        status, ocx or "默认", page, e), "warn")
+                    break
+                for p in pts:
+                    if p.person_id not in seen:
+                        seen.add(p.person_id)
+                        out.append(p)
+                    if len(out) >= max_n:
+                        return out
+                if len(pts) < 1 or page * 20 >= int(total or 0):
+                    break
+            if out:
+                break
+        return out
+
+    def _p6_dump_ref(self, label: str, status: str) -> Optional[Dict]:
+        want = {"5": "医生申请", "6": "居民申请", "0": "已签约"}.get(status, "")
+        people = self._p6_scan(status, max_n=5)
+        self._p6_log("[%s] 状态=%s 抽到 %d 人: %s" % (
+            label, status, len(people), [p.name for p in people]))
+        for p in people:
+            raw = self._p6_raw_personal(p.person_id)
+            for r in self._p6_parse_rows(raw):
+                st = r["cells"][1] if len(r["cells"]) > 1 else ""
+                if want and want in st:
+                    fn = os.path.join(
+                        self._p6_base_dir(),
+                        "raw_b0105_%s_%s.xml" % (status, p.person_id))
+                    try:
+                        with open(fn, "w", encoding="utf-8") as f:
+                            f.write(raw)
+                    except Exception:
+                        pass
+                    self._p6_log("  ✓ %s pid=%s cc=%s 状态='%s' (%d 个字段) → %s" % (
+                        p.name, p.person_id, r["cc"], st, len(r["attrs"]),
+                        os.path.basename(fn)), "ok")
+                    return {"name": p.name, "pid": p.person_id, "row": r}
+        self._p6_log("  未找到状态='%s'的可用样本。" % want, "warn")
+        return None
+
+    def _p6_diff(self, ref6: Optional[Dict], ref5: Optional[Dict]):
+        self._p6_log("=== 字段对比：居民申请(6) vs 医生申请(5) ===", "info")
+        if not (ref6 and ref5):
+            self._p6_log(">>> 样本不足，无法对比 (6=%s, 5=%s)。可能该机构暂无对应记录。"
+                         % (bool(ref6), bool(ref5)), "warn")
+            return
+        a6, a5 = ref6["row"]["attrs"], ref5["row"]["attrs"]
+        keys = sorted(set(a6) | set(a5))
+        diffs = []
+        for k in keys:
+            v6, v5 = a6.get(k, "∅"), a5.get(k, "∅")
+            if v6 != v5:
+                diffs.append((k, v6, v5))
+                self._p6_log("  差异字段 %s : 6→'%s'  5→'%s'" % (k, v6, v5), "ok")
+        if diffs:
+            self._p6_log(">>> 以上『差异字段』就是区分『居民申请/医生申请』的候选；"
+                         "把它们发给我们即可锁定写法。", "info")
+        else:
+            self._p6_log(">>> 两条记录的属性完全一致 → 区分位不在 <row> 属性里"
+                         "(可能在隐藏列/单元格文本)。", "warn")
+            self._p6_log("  cells(6)=%s" % ref6["row"]["cells"])
+            self._p6_log("  cells(5)=%s" % ref5["row"]["cells"])
+
+    def _on_p6_diagnose(self):
+        if self._p6_busy or not self._p6_check_login():
+            return
+        self._p6_busy = True
+        self.var_p6_status.set("诊断中...")
+        threading.Thread(target=self._p6_diagnose_worker, daemon=True).start()
+
+    def _p6_diagnose_worker(self):
+        try:
+            self._p6_log("================ 只读诊断开始 ================", "info")
+            self._p6_log("机构=%s 医生=%s" % (
+                getattr(self.client, "org_code", "") or "?",
+                getattr(self.client, "doctor_name", "") or "?"))
+            for st in ("0", "1", "5", "6"):
+                n = len(self._p6_scan(st, max_n=20))
+                self._p6_log("  状态[%s %s]: 抽到 %d 人" % (
+                    st, {"0": "已签约", "1": "未签约", "5": "医生申请",
+                         "6": "居民申请"}[st], n))
+            ref6 = self._p6_dump_ref("居民申请", "6")
+            ref5 = self._p6_dump_ref("医生申请", "5")
+            self._p6_diff(ref6, ref5)
+            self._p6_log("================ 只读诊断结束 ================", "info")
+            self._p6_log("请点【导出日志（打包发给我们）】，把生成的 zip 发给我们。", "ok")
+        except Exception as e:
+            self._p6_log("诊断异常: %s" % e, "err")
+        finally:
+            self._p6_busy = False
+            self.after(0, lambda: self.var_p6_status.set("诊断完成"))
+
+    # ---- 阶段B: 写入试探(可选, 自动清理) ----
+    def _p6_resolve_ctx(self, pid: str):
+        ts = str(int(time.time() * 1000))
+        enc = PH3Crypto.crptosEn(pid + "|" + ts, self.client.token_en)
+        sign = PH3Crypto.crptosTH(enc + self.client.token_th)
+        html = self.client.session.get(
+            self.client._url("/Sys_JCWS/B0105/Pg_Insert_B0105.aspx"),
+            params={"GUID": enc, "sign": sign}, timeout=self.client._timeout).text
+        teams = self.client._load_teams(html)
+        tid, tname = self.client._find_team(teams, team_name=self.client.team_name)
+        if not tid and teams:
+            tid, tname = teams[0].get("id", ""), teams[0].get("name", "")
+        fwb_ids, fwb_names = self.client._load_service_packs("0")
+        return tid, tname, fwb_ids, fwb_names
+
+    def _p6_base_row(self, pid: str, ctx, phone: str) -> Dict:
+        today = time.strftime("%Y%m%d")
+        end = str(int(today[:4]) + 3) + today[4:]
+        tid, tname, fwb_ids, fwb_names = ctx
+        return {
+            "PERSONID": pid, "B0105_03": tname,
+            "B0105_04": self.client.doctor_name or "", "B0105_05": today,
+            "B0105_07": today, "B0105_09": end, "B0105_08": "3",
+            "B0105_03_GUID": tid, "B0105_06_GUID": fwb_ids, "B0105_06": fwb_names,
+            "JTID": "", "B0105_13": "5", "B0105_10": "0", "B0105_11": "0",
+            "B0105_12": "0", "B0105_01": "2", "B0105_02": phone,
+        }
+
+    def _p6_submit_action10(self, row: Dict):
+        resp = self.client.session.post(
+            self.client._url("/Sys_JCWS/B0105/Do_B0105_Handler.ashx"),
+            data={"ACTION": "10",
+                  "JSON": json.dumps([row], ensure_ascii=False)},
+            headers=self.client._csrf_header(), timeout=self.client._timeout)
+        try:
+            obj = json.loads(resp.text.strip())
+            return obj.get("opType"), obj.get("msg", "")
+        except Exception:
+            return None, "(非JSON) " + resp.text[:120]
+
+    def _p6_new_contract(self, pid: str, before: set):
+        try:
+            for x in self.client.list_personal_b0105(pid):
+                cc = x.get("contract_code", "")
+                if cc and cc not in before:
+                    return cc, x.get("status_text", "")
+        except Exception:
+            pass
+        return "", ""
+
+    def _on_p6_sweep(self):
+        if self._p6_busy or not self._p6_check_login():
+            return
+        pid = self.var_p6_pid.get().strip()
+        phone = self.var_p6_phone.get().strip()
+        if not pid:
+            messagebox.showinfo("提示", "请先填写测试对象 PERSONID。")
+            return
+        if not phone:
+            messagebox.showinfo("提示", "请填写服务电话（避免占位号污染真实数据）。")
+            return
+        if not self.var_p6_ack.get():
+            messagebox.showwarning(
+                "需确认", "请先勾选『我确认这是测试对象，允许新建并自动删除』。")
+            return
+        if not messagebox.askyesno(
+            "再次确认",
+            "将就 PERSONID=%s 反复新建并随即删除若干试探合同，仅用于探测。\n"
+            "确定该对象可被这样操作吗？" % pid):
+            return
+        self._p6_busy = True
+        self.var_p6_status.set("写入试探中...")
+        threading.Thread(
+            target=self._p6_sweep_worker, args=(pid, phone), daemon=True).start()
+
+    def _p6_sweep_worker(self, pid: str, phone: str):
+        created: List[str] = []
+        try:
+            self._p6_log("================ 写入试探开始 (pid=%s) ================"
+                         % pid, "info")
+            if not getattr(self.client, "org_code", ""):
+                self._p6_log("无机构代码，中止。", "err")
+                return
+            ctx = self._p6_resolve_ctx(pid)
+            self._p6_log("团队=%s 服务包字段长度=%d" % (ctx[1] or "?",
+                                                  len(ctx[2] or "")))
+            if not ctx[0]:
+                self._p6_log("团队解析失败，中止。", "err")
+                return
+            # 候选：把某字段设成"居民侧"取值，看服务器是否落成 状态6。
+            candidates = [
+                ("B0105_13", "6"), ("B0105_01", "6"), ("B0105_01", "1"),
+                ("B0105_10", "1"), ("B0105_11", "1"), ("B0105_12", "1"),
+                ("SQLY", "2"), ("SQFS", "2"), ("B0105_14", "6"),
+                ("B0105_15", "6"),
+            ]
+            hit = False
+            for field, val in candidates:
+                before = set()
+                try:
+                    before = {x.get("contract_code", "")
+                              for x in self.client.list_personal_b0105(pid)}
+                except Exception:
+                    pass
+                row = self._p6_base_row(pid, ctx, phone)
+                row[field] = val
+                op, msg = self._p6_submit_action10(row)
+                time.sleep(0.6)
+                cc, st = self._p6_new_contract(pid, before)
+                if cc:
+                    created.append(cc)
+                self._p6_log("  [%s=%s] opType=%s msg=%s → 新合同=%s 状态=%s" % (
+                    field, val, op, (msg or "")[:40], cc[:12] or "无", st or "-"))
+                if st and "居民申请" in st:
+                    self._p6_log("  ★★★ 命中! [%s=%s] 服务器落成 居民申请(6)!" % (
+                        field, val), "ok")
+                    r = self.client.confirm_signing(pid, cc)
+                    time.sleep(0.6)
+                    # 复查该合同最终状态
+                    st2 = ""
+                    try:
+                        for x in self.client.list_personal_b0105(pid):
+                            if x.get("contract_code") == cc:
+                                st2 = x.get("status_text", "")
+                    except Exception:
+                        pass
+                    self._p6_log("  确认 ACTION=9 → success=%s, 复查状态=%s" % (
+                        r.success, st2 or "?"),
+                        "ok" if (st2 == "已签约") else "warn")
+                    if st2 == "已签约":
+                        self._p6_log("  ☆☆☆ 闭环成立: 医生造6 + 确认 → 已签约!! "
+                                     "字段=%s 取值=%s" % (field, val), "ok")
+                    hit = True
+                    break
+            if not hit:
+                self._p6_log(">>> 本轮候选均未让服务器落成 居民申请(6)。"
+                             "请把日志发我们，结合只读诊断的差异字段再调整候选。", "warn")
+        except Exception as e:
+            self._p6_log("写入试探异常: %s" % e, "err")
+        finally:
+            self._p6_log("---- 清理：删除本次新建的试探合同 ----", "info")
+            for cc in created:
+                try:
+                    ok = self.client.delete_signing(cc)
+                except Exception as e:
+                    ok = False
+                    self._p6_log("  删除 %s 异常: %s" % (cc[:16], e), "warn")
+                else:
+                    self._p6_log("  删除 %s → %s" % (
+                        cc[:16], "成功" if ok else "失败(请手动核查)"),
+                        "ok" if ok else "err")
+            self._p6_log("================ 写入试探结束 ================", "info")
+            self._p6_busy = False
+            self.after(0, lambda: self.var_p6_status.set("试探完成"))
+
+    # ---- 导出 / 打开目录 ----
+    def _p6_export(self):
+        import zipfile
+        d = self._p6_base_dir()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default = "签约门路探测日志_%s.zip" % ts
+        dst = filedialog.asksaveasfilename(
+            title="导出签约门路探测日志(打包)", defaultextension=".zip",
+            initialfile=default)
+        if not dst:
+            return
+        try:
+            with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zf:
+                for name in os.listdir(d):
+                    fp = os.path.join(d, name)
+                    if os.path.isfile(fp):
+                        zf.write(fp, arcname=name)
+            messagebox.showinfo(
+                "已导出", "日志已打包导出:\n%s\n请把该 zip 文件发给我们。" % dst)
+        except Exception as e:
+            messagebox.showerror("导出失败", str(e))
+
+    def _open_p6_dir(self):
+        d = self._p6_base_dir()
         try:
             if sys.platform == "darwin":
                 import subprocess
