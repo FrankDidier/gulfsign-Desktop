@@ -31,6 +31,9 @@ class ClientPackageCreator:
             "license_client.py",
             "config_manager.py",
             "batch_processor.py",
+            # app.py 顶层 import 这两个, 缺失会导致打包版启动即崩溃。
+            "qr_login_dialog.py",
+            "hc_diagnostics.py",
             "gulfsign_config.json",
             "requirements.txt",
         ]
