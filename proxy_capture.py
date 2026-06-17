@@ -43,6 +43,22 @@ TUNNEL_HOSTS = {
     "mp.weixin.qq.com",
 }
 
+# 任意子域名都拦截 (公卫3.0 / 健康卡 平台一律走 *.hnhfpc.gov.cn).
+# 竞品软件用 Playwright 驱动的浏览器登录 ggws 网页, 真正"造居民申请(6)"
+# 的写请求就发往这些域名. 用后缀匹配可覆盖以后新增的子域名.
+INTERCEPT_HOST_SUFFIXES = (
+    ".hnhfpc.gov.cn",
+)
+
+# "全程录制"模式下, 我们想看 **每一条** 发往公卫域名的请求+响应原文,
+# 而不仅仅是下面 6 个已知签约端点. 这些关键词只用来在实时日志里"高亮"
+# 可能与"医生申请(5)→居民申请(6)"切换相关的流, 不影响落盘 (落盘是全量).
+FLOW_HIGHLIGHT_KEYWORDS = (
+    "居民申请", "医生申请", "用户申请", "拒绝签约",
+    "QYZT", "SQZT", "CONTRACT_STATE", "APPLICANT", "SQLY",
+    "B0107", "B0105", "B0101", "ACTION=10", "ACTION=6", "ACTION=5",
+)
+
 # 家医签约抓包: 用户在公卫3.0网页里点 [家医签约] 按钮时, 我们要捕获 POST.
 # 可疑端点 (基于 js_native.pyc 反编译 + 已知接口表):
 #   /Sys_JCWS/B0105/Do_B0105_Handler.ashx  ← 居民档案签约相关
@@ -490,6 +506,10 @@ class OpenIDProxy:
         on_wechatcode: Optional[Callable] = None,
         on_sign_captured: Optional[Callable] = None,
         sign_capture_dir: Optional[str] = None,
+        capture_all: bool = False,
+        session_dir: Optional[str] = None,
+        extra_intercept_hosts: Optional[Set[str]] = None,
+        on_flow: Optional[Callable] = None,
     ):
         self.port = port
         self.on_openid = on_openid
@@ -498,13 +518,22 @@ class OpenIDProxy:
         # 家医签约抓包回调 — 接收 dict: {timestamp, host, method, path, query,
         # action, headers, body_text, body_form, raw_request}
         self.on_sign_captured = on_sign_captured
+        # 全程录制 (capture_all): 把每一条发往公卫域名的请求+响应原文整条落盘,
+        # 并通过 on_flow(dict) 回调上层 (用于实时表格/高亮). 用于"录制对方软件
+        # 全过程", 找出它到底打哪个端点、用哪个字段把签约状态写成居民申请(6).
+        self.capture_all = capture_all
+        self.on_flow = on_flow
+        self.extra_intercept_hosts = set(extra_intercept_hosts or set())
         self._running = False
         self._server_socket = None
         self._thread = None
         self._found_openids: Set[str] = set()
         self._found_wechatcodes: Set[str] = set()
         self._sign_captures: list = []
+        self._flows: list = []
+        self._flow_seq = 0
         self._traffic_log_lock = threading.Lock()
+        self._flow_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         cert_dir = os.path.join(base_dir, "certs")
@@ -513,6 +542,16 @@ class OpenIDProxy:
         self.sign_capture_dir = sign_capture_dir or os.path.join(
             base_dir, ".dbg", "sign_captures"
         )
+        # 每次会话一个独立目录: logs/竞品全程录制/<时间戳>/
+        if session_dir:
+            self.session_dir = session_dir
+        else:
+            import datetime as _dt
+            self.session_dir = os.path.join(
+                base_dir, "logs", "竞品全程录制",
+                _dt.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            )
+        self.flow_index_path = os.path.join(self.session_dir, "_index.jsonl")
 
     @property
     def ca_cert_path(self):
@@ -538,7 +577,7 @@ class OpenIDProxy:
         try:
             import datetime
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            text = data.decode("utf-8", errors="replace")[:8000]
+            text = data.decode("utf-8", errors="replace")[:200000]
             with self._traffic_log_lock:
                 with open(self.traffic_log_path, "a", encoding="utf-8") as f:
                     f.write("\n" + "=" * 70 + "\n")
@@ -687,6 +726,179 @@ class OpenIDProxy:
     def sign_captures(self) -> list:
         """返回当前会话内已捕获的签约请求记录列表 (副本)."""
         return list(self._sign_captures)
+
+    @property
+    def flows(self) -> list:
+        """全程录制模式下捕获的所有流 (副本)."""
+        with self._flow_lock:
+            return list(self._flows)
+
+    def _record_full_flow(self, hostname: str, request_data: bytes, response: bytes):
+        """全程录制: 把一条 (请求, 响应) 完整 (不截断) 写到会话目录,
+        解析出 method/path/action 等元信息, 命中关键词时高亮, 并回调 on_flow.
+
+        这是"录制对方软件全过程"的核心 — 我们不预设端点, 凡是发往公卫域名
+        的写/读请求一律整条留存, 之后离线对比即可定位"造居民申请(6)"的端点。
+        """
+        if not request_data:
+            return
+
+        import datetime
+        import json
+        from urllib.parse import urlparse, parse_qsl
+
+        # ---- 解析请求行 ----
+        head_end = request_data.find(b"\r\n\r\n")
+        head_part = request_data[:head_end] if head_end >= 0 else request_data
+        head_text = head_part.decode("utf-8", errors="replace")
+        lines = head_text.split("\r\n")
+        try:
+            method, path_full, _ver = lines[0].split(" ", 2)
+        except (ValueError, IndexError):
+            method, path_full = "?", "?"
+
+        req_headers: dict = {}
+        for ln in lines[1:]:
+            if ":" in ln:
+                k, _, v = ln.partition(":")
+                req_headers[k.strip()] = v.strip()
+
+        u = urlparse("http://x" + path_full) if path_full.startswith("/") else urlparse(path_full)
+        path_only = u.path or path_full
+        query_dict = dict(parse_qsl(u.query, keep_blank_values=True))
+        action = query_dict.get("ACTION") or query_dict.get("action") or ""
+
+        req_body = request_data[head_end + 4:] if head_end >= 0 else b""
+        body_text = req_body.decode("utf-8", errors="replace")
+        body_form: dict = {}
+        if body_text and "=" in body_text and "<" not in body_text[:32]:
+            try:
+                body_form = dict(parse_qsl(body_text, keep_blank_values=True))
+            except Exception:
+                body_form = {}
+
+        # ---- 响应状态码 ----
+        resp_status = ""
+        resp_text_full = response.decode("utf-8", errors="replace") if response else ""
+        if resp_text_full[:5].upper().startswith("HTTP"):
+            try:
+                resp_status = resp_text_full.split(" ", 2)[1]
+            except Exception:
+                resp_status = ""
+
+        # ---- 命中高亮关键词? (只看请求行/请求体/响应) ----
+        scan_blob = (path_full + "\n" + body_text + "\n" + resp_text_full)
+        hits = [kw for kw in FLOW_HIGHLIGHT_KEYWORDS if kw in scan_blob]
+        is_write = method.upper() in ("POST", "PUT", "PATCH", "DELETE")
+
+        with self._flow_lock:
+            self._flow_seq += 1
+            seq = self._flow_seq
+
+        ts = datetime.datetime.now()
+        rec = {
+            "seq": seq,
+            "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "host": hostname,
+            "method": method,
+            "path": path_only,
+            "query": query_dict,
+            "action": action,
+            "resp_status": resp_status,
+            "is_write": is_write,
+            "highlights": hits,
+            "req_bytes": len(request_data),
+            "resp_bytes": len(response or b""),
+        }
+
+        # ---- 整条原文落盘 (不截断) ----
+        try:
+            os.makedirs(self.session_dir, exist_ok=True)
+            tag = (action or method or "flow").replace("/", "_")[:24]
+            fn = "%04d_%s_%s_%s.txt" % (
+                seq, ts.strftime("%H%M%S"), hostname.split(".")[0], tag,
+            )
+            fp = os.path.join(self.session_dir, fn)
+            with open(fp, "w", encoding="utf-8", errors="replace") as f:
+                f.write("# ===== GULFSIGN 全程录制 流 #%d =====\n" % seq)
+                f.write("# time   : %s\n" % rec["timestamp"])
+                f.write("# host   : %s\n" % hostname)
+                f.write("# method : %s  path: %s  ACTION: %s\n" % (method, path_only, action or "-"))
+                f.write("# resp   : HTTP %s  (req %dB / resp %dB)\n" % (
+                    resp_status or "?", rec["req_bytes"], rec["resp_bytes"]))
+                if hits:
+                    f.write("# *** 命中关键词: %s ***\n" % ", ".join(hits))
+                f.write("\n" + ">" * 30 + " REQUEST " + ">" * 30 + "\n")
+                f.write(request_data.decode("utf-8", errors="replace"))
+                f.write("\n\n" + "<" * 30 + " RESPONSE " + "<" * 30 + "\n")
+                f.write(resp_text_full)
+                f.write("\n")
+            rec["file"] = os.path.basename(fp)
+        except Exception as e:
+            logger.debug("flow file write failed: %s", e)
+            rec["file"] = ""
+
+        # ---- 追加 JSONL 索引 ----
+        try:
+            with self._flow_lock:
+                with open(self.flow_index_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                self._flows.append(rec)
+        except Exception:
+            pass
+
+        # ---- 实时日志: 写请求 / 命中高亮 重点提示 ----
+        if hits:
+            self._log(
+                "★ 命中关键流 #%d  %s %s  ACTION=%s  [%s]" % (
+                    seq, method, path_only, action or "-", ", ".join(hits),
+                ),
+                "warn",
+            )
+        elif is_write:
+            self._log(
+                "● 写请求 #%d  %s %s  ACTION=%s  HTTP %s" % (
+                    seq, method, path_only, action or "-", resp_status or "?",
+                ),
+                "ok",
+            )
+
+        if self.on_flow:
+            try:
+                self.on_flow(rec)
+            except Exception:
+                pass
+
+    def session_summary(self) -> dict:
+        """返回会话统计 (流总数 / 写请求数 / 命中数 / 目录)."""
+        flows = self.flows
+        return {
+            "total": len(flows),
+            "writes": sum(1 for f in flows if f.get("is_write")),
+            "highlights": sum(1 for f in flows if f.get("highlights")),
+            "session_dir": self.session_dir,
+        }
+
+    def export_session_zip(self, dest_path: str) -> bool:
+        """把整个会话目录打包成 zip, 方便客户一键发回来分析."""
+        try:
+            import zipfile
+            if not os.path.isdir(self.session_dir):
+                return False
+            with zipfile.ZipFile(dest_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, _dirs, files in os.walk(self.session_dir):
+                    for name in files:
+                        full = os.path.join(root, name)
+                        rel = os.path.relpath(full, os.path.dirname(self.session_dir))
+                        zf.write(full, rel)
+                # 顺带把整段 traffic_log 也塞进去 (含被隧道放过的域名概览)
+                if os.path.exists(self.traffic_log_path) and \
+                        os.path.getsize(self.traffic_log_path) > 0:
+                    zf.write(self.traffic_log_path, "traffic_log.txt")
+            return True
+        except Exception as e:
+            logger.error("export session zip failed: %s", e)
+            return False
 
     def start(self) -> bool:
         if self._running:
@@ -924,8 +1136,11 @@ h1{color:#333;font-size:22px}
 
         client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
 
-        should_intercept = any(
-            hostname.endswith(h) for h in TARGET_HOSTS
+        hl = (hostname or "").lower()
+        should_intercept = (
+            any(hl == h or hl.endswith("." + h) or hl.endswith(h) for h in TARGET_HOSTS)
+            or any(hl.endswith(suf) for suf in INTERCEPT_HOST_SUFFIXES)
+            or any(hl == eh or hl.endswith(eh) for eh in self.extra_intercept_hosts)
         )
 
         if should_intercept:
@@ -1059,6 +1274,13 @@ h1{color:#333;font-size:22px}
                 self._scan_for_openid(response)
                 if response:
                     self._log_traffic(hostname, "<<< RESPONSE", response)
+
+                # 全程录制: 把这一对 (请求, 响应) 整条落盘 + 回调上层.
+                if self.capture_all:
+                    try:
+                        self._record_full_flow(hostname, request_data, response)
+                    except Exception as e:
+                        logger.debug("record flow skip: %s", e)
 
                 resp_lower = response.lower()
                 req_lower = request_data.lower()

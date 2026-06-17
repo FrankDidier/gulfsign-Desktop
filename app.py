@@ -563,6 +563,10 @@ class GulfSignApp(tk.Tk):
         # 抓到的家医签约 POST 模板列表 (saved JSON paths, 最新在前)
         self._sign_capture_records: list = []
 
+        # 竞品全程录制 (capture_all 模式)
+        self._cap_all_proxy: Optional[OpenIDProxy] = None
+        self._cap_all_running = False
+
         # 状态取证 (snapshot 前后对比)
         self._diag_before_path: str = ""
         self._diag_after_path: str = ""
@@ -647,6 +651,7 @@ class GulfSignApp(tk.Tk):
         tab6 = ttk.Frame(self.notebook, padding=4)
         tab7 = ttk.Frame(self.notebook, padding=4)
         tab8 = ttk.Frame(self.notebook, padding=4)
+        tab9 = ttk.Frame(self.notebook, padding=4)
 
         self.notebook.add(tab1, text=" 3.0系统签约 ")
         self.notebook.add(tab2, text=" 健康卡确认 ")
@@ -657,6 +662,7 @@ class GulfSignApp(tk.Tk):
         self.notebook.add(tab5, text=" 许可证配置 ")
         # 追加在最后, 避免改动既有标签索引 (有代码按固定下标 select)。
         self.notebook.add(tab8, text=" 签约门路探测 ")
+        self.notebook.add(tab9, text=" 竞品全程录制 ")
 
         self._build_ph3_tab(tab1)
         self._build_hc_tab(tab2)
@@ -666,6 +672,7 @@ class GulfSignApp(tk.Tk):
         self._build_diag_tab(tab6)
         self._build_license_tab(tab5)
         self._build_probe_tab(tab8)  # 依赖登录区变量, 故最后构建
+        self._build_full_capture_tab(tab9)
 
     # ================================================================
     # Tab 1: 3.0系统签约
@@ -2369,6 +2376,258 @@ class GulfSignApp(tk.Tk):
         except Exception as e:
             self._cap_log("导出失败: %s" % e, "err")
             messagebox.showerror("导出失败", str(e))
+
+    # ================================================================
+    # Tab 9: 竞品全程录制 (capture-all) — 录下对方软件签约时的全部流量
+    # ================================================================
+
+    def _build_full_capture_tab(self, parent):
+        intro = ttk.LabelFrame(parent, text=" 用途说明 ", padding=8)
+        intro.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(
+            intro,
+            text=(
+                "录制对方软件签约全过程的所有网络流量。开始录制后，本机所有发往\n"
+                "公卫3.0 (*.hnhfpc.gov.cn) 的请求与响应都会被【完整、不截断】地保存，\n"
+                "并自动标红与『医生申请(5)→居民申请(6)』可能相关的关键请求。\n"
+                "用完点『停止并打包』，把生成的 ZIP 发回来即可离线分析。"
+            ),
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        ctrl = ttk.Frame(parent)
+        ctrl.pack(fill=tk.X, pady=(0, 6))
+
+        self.btn_capall_start = ttk.Button(
+            ctrl, text="● 开始录制", command=self._on_capall_start,
+        )
+        self.btn_capall_start.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_capall_stop = ttk.Button(
+            ctrl, text="■ 停止并打包", command=self._on_capall_stop, state=tk.DISABLED,
+        )
+        self.btn_capall_stop.pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            ctrl, text="打开录制目录", command=self._on_capall_open_dir,
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        self.var_capall_status = tk.StringVar(value="未开始")
+        self.lbl_capall_status = ttk.Label(
+            ctrl, textvariable=self.var_capall_status, style="Info.TLabel",
+        )
+        self.lbl_capall_status.pack(side=tk.LEFT, padx=(10, 0))
+
+        self.var_capall_stats = tk.StringVar(value="流: 0  |  写请求: 0  |  关键流: 0")
+        ttk.Label(parent, textvariable=self.var_capall_stats).pack(anchor=tk.W, pady=(0, 4))
+
+        # 关键流表格
+        tbl = ttk.LabelFrame(parent, text=" 命中关键词 / 写请求 ", padding=4)
+        tbl.pack(fill=tk.BOTH, expand=True)
+        cols = ("seq", "time", "method", "path", "action", "status", "hits")
+        self.capall_tree = ttk.Treeview(tbl, columns=cols, show="headings", height=10)
+        for c, t, w in (
+            ("seq", "#", 40), ("time", "时间", 90), ("method", "方法", 60),
+            ("path", "路径", 320), ("action", "ACTION", 70),
+            ("status", "HTTP", 55), ("hits", "命中关键词", 220),
+        ):
+            self.capall_tree.heading(c, text=t)
+            self.capall_tree.column(c, width=w, anchor="w")
+        self.capall_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(tbl, orient=tk.VERTICAL, command=self.capall_tree.yview)
+        self.capall_tree.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.capall_tree.bind("<Double-1>", self._on_capall_open_flow)
+
+        log_frame = ttk.LabelFrame(parent, text=" 实时日志 ", padding=4)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        self.capall_log_text = tk.Text(
+            log_frame, wrap=tk.WORD, state=tk.DISABLED, height=8,
+            font=("Consolas", 9) if sys.platform == "win32" else ("Menlo", 10),
+        )
+        sb2 = ttk.Scrollbar(log_frame, command=self.capall_log_text.yview)
+        self.capall_log_text.configure(yscrollcommand=sb2.set)
+        self.capall_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb2.pack(side=tk.RIGHT, fill=tk.Y)
+        for tag, color in (
+            ("ok", "#16a34a"), ("err", "#dc2626"),
+            ("info", "#2563eb"), ("warn", "#d97706"),
+        ):
+            self.capall_log_text.tag_configure(tag, foreground=color)
+
+    def _capall_log(self, msg: str, tag: str = ""):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = "[%s] %s\n" % (ts, msg)
+
+        def _do():
+            self.capall_log_text.configure(state=tk.NORMAL)
+            self.capall_log_text.insert(tk.END, line, tag)
+            self.capall_log_text.see(tk.END)
+            self.capall_log_text.configure(state=tk.DISABLED)
+
+        if threading.current_thread() is threading.main_thread():
+            _do()
+        else:
+            self.after(0, _do)
+
+    def _on_capall_flow(self, rec: dict):
+        """proxy 线程回调: 把一条流插进表格 + 更新统计 (切回主线程)."""
+        def _do():
+            hits = ", ".join(rec.get("highlights") or [])
+            self.capall_tree.insert(
+                "", 0, iid=str(rec.get("seq")),
+                values=(
+                    rec.get("seq"), (rec.get("timestamp") or "")[11:19],
+                    rec.get("method"), rec.get("path"),
+                    rec.get("action") or "-", rec.get("resp_status") or "?",
+                    hits,
+                ),
+                tags=("hit",) if hits else (),
+            )
+            self.capall_tree.tag_configure("hit", background="#fef3c7")
+            if self._cap_all_proxy:
+                s = self._cap_all_proxy.session_summary()
+                self.var_capall_stats.set(
+                    "流: %d  |  写请求: %d  |  关键流: %d" % (
+                        s["total"], s["writes"], s["highlights"],
+                    )
+                )
+        self.after(0, _do)
+
+    def _on_capall_start(self):
+        if self._cap_all_running:
+            return
+        if self._proxy_running or self._cap_running:
+            messagebox.showwarning(
+                "提示", "请先停止其它页面的代理/抓包 (获取OpenID、流量抓包)，再开始录制",
+            )
+            return
+
+        for iid in self.capall_tree.get_children():
+            self.capall_tree.delete(iid)
+
+        self._capall_log("正在启动全程录制...", "info")
+
+        def on_log(msg, tag=""):
+            self._capall_log(msg, tag or "info")
+
+        def on_flow(rec):
+            self._on_capall_flow(rec)
+
+        self._cap_all_proxy = OpenIDProxy(
+            port=8888,
+            on_log=on_log,
+            on_flow=on_flow,
+            capture_all=True,
+        )
+
+        if not self._cap_all_proxy.start():
+            self.var_capall_status.set("启动失败")
+            self.lbl_capall_status.configure(style="Error.TLabel")
+            return
+
+        self._cap_all_running = True
+        self.btn_capall_start.configure(state=tk.DISABLED)
+        self.btn_capall_stop.configure(state=tk.NORMAL)
+        self.var_capall_status.set("录制中")
+        self.lbl_capall_status.configure(style="Success.TLabel")
+
+        if install_ca_to_system(self._cap_all_proxy.ca_cert_path):
+            self._capall_log("CA证书已安装", "ok")
+        else:
+            self._capall_log("CA证书安装失败，可能需要确认弹窗（请允许）", "warn")
+
+        if set_system_proxy("127.0.0.1", 8888):
+            self._capall_log("系统代理已设置: 127.0.0.1:8888", "ok")
+        else:
+            self._capall_log("系统代理设置失败", "err")
+
+        self._capall_log("录制目录: %s" % self._cap_all_proxy.session_dir, "info")
+        self._capall_log("现在请操作对方软件，完成一次签约。完成后点『停止并打包』。", "info")
+
+    def _on_capall_stop(self):
+        clear_system_proxy()
+        self._capall_log("系统代理已清除", "ok")
+
+        proxy = self._cap_all_proxy
+        if proxy:
+            proxy.stop()
+        self._cap_all_running = False
+        self.btn_capall_start.configure(state=tk.NORMAL)
+        self.btn_capall_stop.configure(state=tk.DISABLED)
+        self.var_capall_status.set("已停止")
+        self.lbl_capall_status.configure(style="Info.TLabel")
+
+        if not proxy:
+            return
+        s = proxy.session_summary()
+        self._capall_log(
+            "录制结束: 共 %d 条流 (写请求 %d，关键流 %d)" % (
+                s["total"], s["writes"], s["highlights"],
+            ),
+            "ok",
+        )
+        if s["total"] == 0:
+            self._capall_log(
+                "未捕获到任何公卫域名流量。可能对方软件的浏览器没有走系统代理——"
+                "请确认录制期间对方软件是新启动的（已运行的浏览器需重启才生效）。",
+                "warn",
+            )
+
+        default_name = "竞品录制_%s.zip" % datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = filedialog.asksaveasfilename(
+            title="导出录制包",
+            defaultextension=".zip",
+            filetypes=[("ZIP 压缩包", "*.zip"), ("所有文件", "*.*")],
+            initialfile=default_name,
+        )
+        if not dest:
+            self._capall_log("已取消导出（原始文件仍保留在录制目录）", "info")
+            return
+        if proxy.export_session_zip(dest):
+            self._capall_log("录制包已导出: %s" % dest, "ok")
+            messagebox.showinfo("导出成功", "录制包已保存到:\n%s\n\n把它发回来即可分析。" % dest)
+        else:
+            self._capall_log("导出失败（录制目录可能为空）", "err")
+
+    def _on_capall_open_dir(self):
+        d = self._cap_all_proxy.session_dir if self._cap_all_proxy else os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "logs", "竞品全程录制",
+        )
+        try:
+            os.makedirs(d, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(d)  # noqa
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.run(["open", d])
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", d])
+        except Exception as e:
+            messagebox.showerror("打开失败", str(e))
+
+    def _on_capall_open_flow(self, _event=None):
+        sel = self.capall_tree.selection()
+        if not sel or not self._cap_all_proxy:
+            return
+        seq = sel[0]
+        sdir = self._cap_all_proxy.session_dir
+        try:
+            for name in os.listdir(sdir):
+                if name.startswith("%04d_" % int(seq)):
+                    fp = os.path.join(sdir, name)
+                    if sys.platform == "win32":
+                        os.startfile(fp)  # noqa
+                    elif sys.platform == "darwin":
+                        import subprocess
+                        subprocess.run(["open", fp])
+                    else:
+                        import subprocess
+                        subprocess.run(["xdg-open", fp])
+                    return
+        except Exception as e:
+            messagebox.showerror("打开失败", str(e))
 
     # -- Tab 4: Sign Capture (家医签约 抓包) --
 

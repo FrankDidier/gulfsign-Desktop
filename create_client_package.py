@@ -56,6 +56,8 @@ class ClientPackageCreator:
             "使用说明_最终版.txt",
             "快速上手指南.txt",
             "操作教程.txt",
+            "教程_签约门路探测.txt",
+            "教程_竞品全程录制.txt",
             "README_EXE_BUILD.md",
             "sqli_exploitation_benefits_analysis.md",
             "final_deployment_summary.md",
