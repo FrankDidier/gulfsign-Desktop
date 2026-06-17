@@ -3365,6 +3365,13 @@ class GulfSignApp(tk.Tk):
         self.var_p6_status = tk.StringVar(value="待操作")
         ttk.Label(a, textvariable=self.var_p6_status,
                   foreground="#6b7280").pack(side=tk.LEFT)
+        a2 = ttk.Frame(parent)
+        a2.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(a2, text="指定 PERSONID（多个用逗号/空格分隔；留空则自动抓样本）：").pack(
+            side=tk.LEFT)
+        self.var_p6_pids = tk.StringVar()
+        ttk.Entry(a2, textvariable=self.var_p6_pids, width=46).pack(
+            side=tk.LEFT, padx=(4, 0))
 
         # --- 阶段B 写入试探(高级·可选) ---
         b = ttk.LabelFrame(
@@ -3585,27 +3592,89 @@ class GulfSignApp(tk.Tk):
             self._p6_log("  cells(6)=%s" % ref6["row"]["cells"])
             self._p6_log("  cells(5)=%s" % ref5["row"]["cells"])
 
+    def _p6_dump_pid(self, pid: str) -> List[Tuple[str, Dict]]:
+        """dump 指定 PERSONID 名下的所有签约记录(各状态), 落盘并返回 [(标签, row)]。"""
+        raw = self._p6_raw_personal(pid)
+        if not raw:
+            self._p6_log("  PERSONID=%s 无法读取记录(可能不在该医生可见范围)。" % pid,
+                         "warn")
+            return []
+        fn = os.path.join(self._p6_base_dir(), "raw_b0105_pid_%s.xml" % pid)
+        try:
+            with open(fn, "w", encoding="utf-8") as f:
+                f.write(raw)
+        except Exception:
+            pass
+        rows = self._p6_parse_rows(raw)
+        out = []
+        for r in rows:
+            st = r["cells"][1] if len(r["cells"]) > 1 else "?"
+            label = "%s|%s" % (pid[-6:], st)
+            out.append((label, r))
+            self._p6_log("  PERSONID=%s 合同=%s 状态=%s (%d 字段)" % (
+                pid, r["cc"], st, len(r["attrs"])))
+        if not rows:
+            self._p6_log("  PERSONID=%s 名下无签约记录。" % pid, "warn")
+        return out
+
+    def _p6_diff_many(self, items: List[Tuple[str, Dict]]):
+        """对多条记录逐字段对比, 标出"取值不完全一致"的字段。"""
+        self._p6_log("=== 多条记录字段对比 ===", "info")
+        if len(items) < 2:
+            self._p6_log(">>> 有效记录不足 2 条, 无法对比。", "warn")
+            return
+        labels = [lb for lb, _ in items]
+        self._p6_log("参与对比(%d 条): %s" % (len(items), ", ".join(labels)))
+        keys = sorted({k for _, r in items for k in r["attrs"]})
+        diff_keys = []
+        for k in keys:
+            vals = [r["attrs"].get(k, "∅") for _, r in items]
+            if len(set(vals)) > 1:
+                diff_keys.append(k)
+                pairs = "  ".join("%s→'%s'" % (lb, v)
+                                  for (lb, _), v in zip(items, vals))
+                self._p6_log("  差异字段 %s : %s" % (k, pairs), "ok")
+        if diff_keys:
+            self._p6_log(">>> 重点看『正常居民申请』与『对方团队居民申请』在上面哪几个"
+                         "字段不同——那就是对方造 6 的关键写法。", "info")
+        else:
+            self._p6_log(">>> 这些记录的 <row> 属性完全一致, 区分位可能在隐藏列/单元格。",
+                         "warn")
+            for lb, r in items:
+                self._p6_log("  cells[%s]=%s" % (lb, r["cells"]))
+
     def _on_p6_diagnose(self):
         if self._p6_busy or not self._p6_check_login():
             return
         self._p6_busy = True
         self.var_p6_status.set("诊断中...")
-        threading.Thread(target=self._p6_diagnose_worker, daemon=True).start()
+        pids_raw = self.var_p6_pids.get().strip()
+        threading.Thread(
+            target=self._p6_diagnose_worker, args=(pids_raw,), daemon=True).start()
 
-    def _p6_diagnose_worker(self):
+    def _p6_diagnose_worker(self, pids_raw: str = ""):
         try:
             self._p6_log("================ 只读诊断开始 ================", "info")
             self._p6_log("机构=%s 医生=%s" % (
                 getattr(self.client, "org_code", "") or "?",
                 getattr(self.client, "doctor_name", "") or "?"))
-            for st in ("0", "1", "5", "6"):
-                n = len(self._p6_scan(st, max_n=20))
-                self._p6_log("  状态[%s %s]: 抽到 %d 人" % (
-                    st, {"0": "已签约", "1": "未签约", "5": "医生申请",
-                         "6": "居民申请"}[st], n))
-            ref6 = self._p6_dump_ref("居民申请", "6")
-            ref5 = self._p6_dump_ref("医生申请", "5")
-            self._p6_diff(ref6, ref5)
+            pids = [p for p in re.split(r"[,\s，、]+", pids_raw) if p]
+            if pids:
+                self._p6_log("按指定 PERSONID 抓取并对比(%d 个): %s" % (
+                    len(pids), pids), "info")
+                items: List[Tuple[str, Dict]] = []
+                for pid in pids:
+                    items.extend(self._p6_dump_pid(pid))
+                self._p6_diff_many(items)
+            else:
+                for st in ("0", "1", "5", "6"):
+                    n = len(self._p6_scan(st, max_n=20))
+                    self._p6_log("  状态[%s %s]: 抽到 %d 人" % (
+                        st, {"0": "已签约", "1": "未签约", "5": "医生申请",
+                             "6": "居民申请"}[st], n))
+                ref6 = self._p6_dump_ref("居民申请", "6")
+                ref5 = self._p6_dump_ref("医生申请", "5")
+                self._p6_diff(ref6, ref5)
             self._p6_log("================ 只读诊断结束 ================", "info")
             self._p6_log("请点【导出日志（打包发给我们）】，把生成的 zip 发给我们。", "ok")
         except Exception as e:
