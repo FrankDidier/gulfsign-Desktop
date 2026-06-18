@@ -36,6 +36,7 @@ from proxy_capture import (
     set_windows_proxy, clear_windows_proxy,
     install_ca_to_windows, remove_ca_from_windows,
     set_system_proxy, clear_system_proxy, install_ca_to_system,
+    set_requests_ca_env, clear_requests_ca_env,
 )
 from license_client import LicenseClient
 from config_manager import ConfigManager
@@ -2412,6 +2413,14 @@ class GulfSignApp(tk.Tk):
             ctrl, text="打开录制目录", command=self._on_capall_open_dir,
         ).pack(side=tk.LEFT, padx=(0, 6))
 
+        self.var_capall_trust = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            parent,
+            text=("让对方软件信任证书（增强捕获）— 对方软件用 Python requests 时勾选；"
+                  "勾选后会设置环境变量，需【重启对方软件】才生效，停止时自动还原"),
+            variable=self.var_capall_trust,
+        ).pack(anchor=tk.W, pady=(0, 4))
+
         self.var_capall_status = tk.StringVar(value="未开始")
         self.lbl_capall_status = ttk.Label(
             ctrl, textvariable=self.var_capall_status, style="Info.TLabel",
@@ -2542,12 +2551,28 @@ class GulfSignApp(tk.Tk):
         else:
             self._capall_log("系统代理设置失败", "err")
 
+        # 增强捕获: 让对方软件 (Python requests/certifi) 信任我们的证书。
+        if self.var_capall_trust.get():
+            bundle = self._cap_all_proxy.cert_mgr.ensure_combined_bundle()
+            if bundle and set_requests_ca_env(bundle):
+                self._capall_log("已设置证书信任环境变量 (REQUESTS_CA_BUNDLE 等)", "ok")
+                self._capall_log(
+                    "★ 重要: 请【完全关闭并重启对方软件】后再签约，否则它读不到该设置。",
+                    "warn",
+                )
+            else:
+                self._capall_log("设置证书信任环境变量失败 (将仅能抓浏览器流量)", "warn")
+
         self._capall_log("录制目录: %s" % self._cap_all_proxy.session_dir, "info")
         self._capall_log("现在请操作对方软件，完成一次签约。完成后点『停止并打包』。", "info")
 
     def _on_capall_stop(self):
         clear_system_proxy()
         self._capall_log("系统代理已清除", "ok")
+
+        if self.var_capall_trust.get():
+            clear_requests_ca_env()
+            self._capall_log("证书信任环境变量已还原", "ok")
 
         proxy = self._cap_all_proxy
         if proxy:

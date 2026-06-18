@@ -354,6 +354,76 @@ def remove_ca_from_windows() -> bool:
         return False
 
 
+# 让用 certifi 默认校验的 Python (requests/urllib3) 信任我们的 MITM 证书:
+# 设置用户级环境变量指向合并证书包。仅对**之后启动**的进程生效, 所以设置后
+# 必须重启对方软件。这些变量会持久化, 故停止抓包时务必清除。
+_CA_ENV_VARS = (
+    "REQUESTS_CA_BUNDLE",  # requests
+    "SSL_CERT_FILE",       # Python ssl / OpenSSL
+    "CURL_CA_BUNDLE",      # curl / 部分库
+    "NODE_EXTRA_CA_CERTS", # node (若对方用 electron/node)
+)
+
+
+def set_requests_ca_env(bundle_path: str) -> bool:
+    """设置用户级 CA 包环境变量 (Windows). 返回是否成功。"""
+    if sys.platform != "win32":
+        for k in _CA_ENV_VARS:
+            os.environ[k] = bundle_path
+        return True
+    if not bundle_path or not os.path.exists(bundle_path):
+        return False
+    try:
+        import subprocess
+        ok = True
+        for k in _CA_ENV_VARS:
+            os.environ[k] = bundle_path
+            r = subprocess.run(
+                ["setx", k, bundle_path], capture_output=True, text=True,
+            )
+            ok = ok and (r.returncode == 0)
+        _broadcast_env_change()
+        return ok
+    except Exception:
+        return False
+
+
+def clear_requests_ca_env() -> bool:
+    """清除之前设置的 CA 包环境变量 (Windows), 还原系统。"""
+    if sys.platform != "win32":
+        for k in _CA_ENV_VARS:
+            os.environ.pop(k, None)
+        return True
+    try:
+        import subprocess
+        for k in _CA_ENV_VARS:
+            os.environ.pop(k, None)
+            subprocess.run(
+                ["reg", "delete", r"HKCU\Environment", "/v", k, "/f"],
+                capture_output=True, text=True,
+            )
+        _broadcast_env_change()
+        return True
+    except Exception:
+        return False
+
+
+def _broadcast_env_change():
+    """通知系统环境变量已变更 (新进程才会拿到, 已运行的不受影响)。"""
+    try:
+        import ctypes
+        HWND_BROADCAST = 0xFFFF
+        WM_SETTINGCHANGE = 0x001A
+        SMTO_ABORTIFHUNG = 0x0002
+        res = ctypes.c_ulong()
+        ctypes.windll.user32.SendMessageTimeoutW(
+            HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment",
+            SMTO_ABORTIFHUNG, 3000, ctypes.byref(res),
+        )
+    except Exception:
+        pass
+
+
 class CertManager:
     """Generate and manage CA + per-host certificates for MITM."""
 
@@ -426,6 +496,47 @@ class CertManager:
         except Exception as e:
             logger.error("CA cert generation failed: %s", e)
             return False
+
+    def ensure_combined_bundle(self) -> Optional[str]:
+        """生成『系统可信根 + 我们的 CA』合并证书包, 路径写到
+        certs/combined_ca_bundle.pem。
+
+        把它配到对方软件进程的 REQUESTS_CA_BUNDLE / SSL_CERT_FILE 环境变量,
+        即可让用 certifi 默认校验的 Python requests 信任我们的 MITM 证书,
+        从而抓到它发往公卫系统的明文请求 (同时不影响它访问其它正常网站)。
+        """
+        try:
+            if not os.path.exists(self.ca_cert_path):
+                if not self.ensure_ca():
+                    return None
+            base_pem = b""
+            try:
+                import certifi
+                with open(certifi.where(), "rb") as f:
+                    base_pem = f.read()
+            except Exception:
+                try:
+                    import ssl as _ssl
+                    cafile = _ssl.get_default_verify_paths().cafile
+                    if cafile and os.path.exists(cafile):
+                        with open(cafile, "rb") as f:
+                            base_pem = f.read()
+                except Exception:
+                    base_pem = b""
+            with open(self.ca_cert_path, "rb") as f:
+                our_pem = f.read()
+            out_path = os.path.join(self.cert_dir, "combined_ca_bundle.pem")
+            with open(out_path, "wb") as f:
+                if base_pem:
+                    f.write(base_pem)
+                    if not base_pem.endswith(b"\n"):
+                        f.write(b"\n")
+                f.write(b"\n# ===== GulfSign local MITM CA =====\n")
+                f.write(our_pem)
+            return out_path
+        except Exception as e:
+            logger.error("combined bundle failed: %s", e)
+            return None
 
     def get_host_cert(self, hostname: str) -> Optional[tuple]:
         """Return (cert_path, key_path) for a hostname, generating if needed."""
@@ -534,6 +645,12 @@ class OpenIDProxy:
         self._flow_seq = 0
         self._traffic_log_lock = threading.Lock()
         self._flow_lock = threading.Lock()
+        # 自适应回退: 某主机的客户端 TLS 握手反复失败 (= 客户端不信任我们的
+        # CA, 例如用 certifi 的 requests) 时, 把它加入直通名单, 之后纯隧道转发,
+        # 保证对方软件/网页能正常访问 (只是这条流抓不到明文)。
+        self._mitm_block: Set[str] = set()
+        self._mitm_fail: dict = {}
+        self._adapt_lock = threading.Lock()
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         cert_dir = os.path.join(base_dir, "certs")
@@ -961,20 +1078,67 @@ class OpenIDProxy:
                     continue
                 break
 
+    def _peek_request_header(self, sock) -> bytes:
+        """用 MSG_PEEK 取出请求头 (到 \r\n\r\n 为止) 而**不消费**套接字数据。
+
+        关键修复: CONNECT 之后客户端紧跟着发 TLS ClientHello, 若用普通 recv
+        很可能把 ClientHello 的前几个字节一起读走 → OpenSSL 读到残缺握手 →
+        握手失败 → 连接被重置 (ERR_CONNECTION_RESET)。改用 peek 找到头边界,
+        只精确消费请求头, ClientHello 原封不动留在内核缓冲交给 OpenSSL。
+        """
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                peek = sock.recv(65536, socket.MSG_PEEK)
+            except socket.timeout:
+                return b""
+            except Exception:
+                return b""
+            if not peek:
+                return b""
+            idx = peek.find(b"\r\n\r\n")
+            if idx >= 0:
+                return peek[:idx + 4]
+            if len(peek) > 60000:
+                return peek
+            time.sleep(0.005)
+        return b""
+
+    @staticmethod
+    def _consume_exact(sock, n: int):
+        """精确消费 n 个字节 (配合 _peek_request_header 用)。"""
+        got = 0
+        while got < n:
+            try:
+                chunk = sock.recv(min(65536, n - got))
+            except Exception:
+                return
+            if not chunk:
+                return
+            got += len(chunk)
+
     def _handle_client(self, client_sock):
         try:
             client_sock.settimeout(15)
-            data = client_sock.recv(8192)
-            if not data:
+            header = self._peek_request_header(client_sock)
+            if not header:
                 client_sock.close()
                 return
 
-            first_line = data.split(b"\r\n")[0].decode("utf-8", errors="replace")
+            first_line = header.split(b"\r\n")[0].decode("utf-8", errors="replace")
 
             if first_line.startswith("CONNECT"):
-                self._handle_connect(client_sock, first_line, data)
+                # 只消费 CONNECT 请求头本身; TLS ClientHello 留给 OpenSSL。
+                self._consume_exact(client_sock, len(header))
+                self._handle_connect(client_sock, first_line, header)
             else:
-                self._handle_http(client_sock, first_line, data)
+                # 普通 HTTP: 直接读取 (无 TLS 握手顺序问题)。
+                data = b""
+                try:
+                    data = client_sock.recv(65536)
+                except Exception:
+                    data = header
+                self._handle_http(client_sock, first_line, data or header)
         except Exception:
             pass
         finally:
@@ -1137,7 +1301,9 @@ h1{color:#333;font-size:22px}
         client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
 
         hl = (hostname or "").lower()
-        should_intercept = (
+        with self._adapt_lock:
+            blocked = hl in self._mitm_block
+        should_intercept = (not blocked) and (
             any(hl == h or hl.endswith("." + h) or hl.endswith(h) for h in TARGET_HOSTS)
             or any(hl.endswith(suf) for suf in INTERCEPT_HOST_SUFFIXES)
             or any(hl == eh or hl.endswith(eh) for eh in self.extra_intercept_hosts)
@@ -1171,7 +1337,11 @@ h1{color:#333;font-size:22px}
             ctx.load_cert_chain(cert_path, key_path)
             client_ssl = ctx.wrap_socket(client_sock, server_side=True)
         except ssl.SSLError:
-            self._tunnel(client_sock, hostname, port)
+            # 客户端在握手期拒绝了我们的证书 (通常是用 certifi 的 requests,
+            # 不读 Windows 证书库)。ClientHello 已被 OpenSSL 消费, 无法再隧道
+            # 救回这条连接 → 干净关闭。多次失败后把该主机加入直通名单, 以后
+            # 纯隧道转发, 保证对方软件能正常访问 (代价: 这台主机抓不到明文)。
+            self._note_mitm_failure(hostname)
             return
         except Exception:
             return
@@ -1299,6 +1469,26 @@ h1{color:#333;font-size:22px}
                 client_ssl.close()
             except Exception:
                 pass
+
+    def _note_mitm_failure(self, hostname: str):
+        """记录一次客户端握手失败; 达到阈值则该主机转直通, 避免反复重置。"""
+        hl = (hostname or "").lower()
+        with self._adapt_lock:
+            self._mitm_fail[hl] = self._mitm_fail.get(hl, 0) + 1
+            n = self._mitm_fail[hl]
+            if n >= 2 and hl not in self._mitm_block:
+                self._mitm_block.add(hl)
+                newly_blocked = True
+            else:
+                newly_blocked = False
+        if newly_blocked:
+            self._log(
+                "⚠ %s 的客户端不信任本地证书 (多半是用 certifi 的 requests)，"
+                "已切换为『直通放行』以保证它能正常联网 — 该程序的这条流量将"
+                "无法解密。若需抓它, 请在『竞品全程录制』里开启"
+                "『让对方软件信任证书』后重启对方软件。" % hostname,
+                "warn",
+            )
 
     def _relay(self, sock1, sock2, timeout=30):
         """Relay data between two sockets."""
