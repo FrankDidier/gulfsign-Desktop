@@ -545,7 +545,7 @@ class CertManager:
 
         try:
             from cryptography import x509
-            from cryptography.x509.oid import NameOID
+            from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
             import datetime
@@ -563,6 +563,10 @@ class CertManager:
             )
             ski = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
 
+            # 关键修复: Windows SChannel / Chrome 对服务器证书很严格 — 缺少
+            # serverAuth EKU 或 KeyUsage 会被直接拒绝 (TLS 握手失败 → 连接重置
+            # ERR_CONNECTION_RESET), 即使 CA 已被信任。OpenSSL/requests 较宽松,
+            # 所以之前只在浏览器上暴露。这里补齐 EKU + KeyUsage。
             cert = (
                 x509.CertificateBuilder()
                 .subject_name(x509.Name([
@@ -571,10 +575,25 @@ class CertManager:
                 .issuer_name(self._ca_cert.subject)
                 .public_key(key.public_key())
                 .serial_number(x509.random_serial_number())
-                .not_valid_before(now)
+                .not_valid_before(now - datetime.timedelta(days=1))
                 .not_valid_after(now + datetime.timedelta(days=365))
                 .add_extension(
                     x509.SubjectAlternativeName([x509.DNSName(hostname)]),
+                    False,
+                )
+                .add_extension(
+                    x509.BasicConstraints(ca=False, path_length=None), True,
+                )
+                .add_extension(
+                    x509.KeyUsage(
+                        digital_signature=True, key_encipherment=True,
+                        content_commitment=False, data_encipherment=False,
+                        key_agreement=False, key_cert_sign=False,
+                        crl_sign=False, encipher_only=False, decipher_only=False,
+                    ), True,
+                )
+                .add_extension(
+                    x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
                     False,
                 )
                 .add_extension(aki, False)
