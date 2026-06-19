@@ -688,6 +688,10 @@ class OpenIDProxy:
                 _dt.datetime.now().strftime("%Y%m%d_%H%M%S"),
             )
         self.flow_index_path = os.path.join(self.session_dir, "_index.jsonl")
+        # 诊断日志: 每条连接走到哪一步、为什么失败, 全部落到 _diag.log
+        # (会随会话目录一起打包进 ZIP, 方便我们离线定位"为什么连接被重置")。
+        self.diag_log_path = os.path.join(self.session_dir, "_diag.log")
+        self._diag_lock = threading.Lock()
 
     @property
     def ca_cert_path(self):
@@ -1152,6 +1156,8 @@ class OpenIDProxy:
                 self._handle_connect(client_sock, first_line, header)
             else:
                 # 普通 HTTP: 直接读取 (无 TLS 握手顺序问题)。
+                if self.capture_all:
+                    self._diag("HTTP  %s" % first_line[:80])
                 data = b""
                 try:
                     data = client_sock.recv(65536)
@@ -1329,8 +1335,11 @@ h1{color:#333;font-size:22px}
         )
 
         if should_intercept:
+            self._diag("CONNECT %s:%s -> MITM" % (hostname, port))
             self._mitm_intercept(client_sock, hostname, port)
         else:
+            self._diag("CONNECT %s:%s -> tunnel (intercept=%s blocked=%s)"
+                       % (hostname, port, should_intercept, blocked))
             self._tunnel(client_sock, hostname, port)
 
     def _tunnel(self, client_sock, hostname, port):
@@ -1339,13 +1348,14 @@ h1{color:#333;font-size:22px}
             remote = socket.create_connection((hostname, port), timeout=10)
             self._relay(client_sock, remote)
             remote.close()
-        except Exception:
-            pass
+        except Exception as e:
+            self._diag("  tunnel %s FAIL: %s: %s" % (hostname, type(e).__name__, e))
 
     def _mitm_intercept(self, client_sock, hostname, port):
         """MITM intercept with HTTP keep-alive support."""
         certs = self.cert_mgr.get_host_cert(hostname)
         if not certs:
+            self._diag("  %s: no host cert -> tunnel" % hostname)
             self._tunnel(client_sock, hostname, port)
             return
 
@@ -1355,14 +1365,18 @@ h1{color:#333;font-size:22px}
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(cert_path, key_path)
             client_ssl = ctx.wrap_socket(client_sock, server_side=True)
-        except ssl.SSLError:
+            self._diag("  %s: client TLS handshake OK" % hostname)
+        except ssl.SSLError as e:
             # 客户端在握手期拒绝了我们的证书 (通常是用 certifi 的 requests,
             # 不读 Windows 证书库)。ClientHello 已被 OpenSSL 消费, 无法再隧道
             # 救回这条连接 → 干净关闭。多次失败后把该主机加入直通名单, 以后
             # 纯隧道转发, 保证对方软件能正常访问 (代价: 这台主机抓不到明文)。
+            self._diag("  %s: client TLS FAIL (SSLError): %s" % (hostname, e))
             self._note_mitm_failure(hostname)
             return
-        except Exception:
+        except Exception as e:
+            self._diag("  %s: client wrap EXC: %s: %s" % (hostname, type(e).__name__, e))
+            self._note_mitm_failure(hostname)
             return
 
         remote_ssl = None
@@ -1372,6 +1386,7 @@ h1{color:#333;font-size:22px}
             remote_ctx.verify_mode = ssl.CERT_NONE
             remote_raw = socket.create_connection((hostname, port), timeout=15)
             remote_ssl = remote_ctx.wrap_socket(remote_raw, server_hostname=hostname)
+            self._diag("  %s: upstream TLS OK" % hostname)
 
             client_ssl.settimeout(60)
 
@@ -1478,6 +1493,7 @@ h1{color:#333;font-size:22px}
 
         except Exception as e:
             logger.debug("MITM error for %s: %s", hostname, e)
+            self._diag("  %s: MITM loop EXC: %s: %s" % (hostname, type(e).__name__, e))
         finally:
             if remote_ssl:
                 try:
@@ -1488,6 +1504,19 @@ h1{color:#333;font-size:22px}
                 client_ssl.close()
             except Exception:
                 pass
+
+    def _diag(self, msg: str):
+        """写一行诊断日志 (线程安全, 不抛异常)。"""
+        try:
+            import datetime
+            ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            line = "[%s] %s\n" % (ts, msg)
+            with self._diag_lock:
+                os.makedirs(self.session_dir, exist_ok=True)
+                with open(self.diag_log_path, "a", encoding="utf-8", errors="replace") as f:
+                    f.write(line)
+        except Exception:
+            pass
 
     def _note_mitm_failure(self, hostname: str):
         """记录一次客户端握手失败; 达到阈值则该主机转直通, 避免反复重置。"""

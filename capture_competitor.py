@@ -166,11 +166,38 @@ def main():
 
     # 证书信任环境变量 (增强捕获)
     if _trust_on:
-        bundle = _proxy.cert_mgr.ensure_combined_bundle()
-        if bundle and set_requests_ca_env(bundle):
-            print("  ✓ 已让对方软件信任证书 (增强捕获已开启)")
+        bundle = None
+        try:
+            bundle = _proxy.cert_mgr.ensure_combined_bundle()
+        except Exception as e:
+            _proxy._diag("ensure_combined_bundle EXC: %s: %s" % (type(e).__name__, e))
+        if not bundle:
+            print("  ⚠ 增强捕获: 合并证书包生成失败（缺 certifi？），仅能抓浏览器流量")
+            _proxy._diag("trust: combined bundle = None")
         else:
-            print("  ⚠ 增强捕获设置失败，将仅能抓浏览器流量")
+            _proxy._diag("trust: bundle=%s exists=%s" % (bundle, os.path.exists(bundle)))
+            # 非 ASCII 路径在 setx 下可能损坏 → 复制一份到纯英文的临时路径
+            safe = bundle
+            try:
+                if any(ord(c) > 127 for c in bundle):
+                    import tempfile, shutil
+                    safe = os.path.join(tempfile.gettempdir(), "gulfsign_ca_bundle.pem")
+                    shutil.copyfile(bundle, safe)
+                    _proxy._diag("trust: bundle path had non-ascii, copied to %s" % safe)
+            except Exception as e:
+                _proxy._diag("trust: safe-copy failed: %s" % e)
+                safe = bundle
+            ok = False
+            try:
+                ok = set_requests_ca_env(safe)
+            except Exception as e:
+                _proxy._diag("set_requests_ca_env EXC: %s: %s" % (type(e).__name__, e))
+            if ok:
+                print("  ✓ 已让对方软件信任证书 (增强捕获已开启)")
+                _proxy._diag("trust: env set OK -> %s" % safe)
+            else:
+                print("  ⚠ 增强捕获: 设置环境变量失败，仅能抓浏览器流量")
+                _proxy._diag("trust: set_requests_ca_env returned False")
 
     print()
     _line("-")
@@ -219,7 +246,9 @@ def main():
         print("  ⚠ 没有录到任何公卫系统流量。常见原因：")
         print("     - 对方软件在『录制已就绪』之前就开着（必须录制就绪后再重启它）")
         print("     - 这次没有真正发起签约")
-        print("  可以直接再运行一次本工具重试。")
+        print()
+        print("  ★ 即使是 0 条，也请把下面生成的 ZIP 发回来 —— 里面有一份")
+        print("    诊断日志(_diag.log)，能帮我们看出到底卡在哪一步。")
         print()
 
     # 打包 ZIP 到桌面
