@@ -1384,9 +1384,20 @@ h1{color:#333;font-size:22px}
             remote_ctx = ssl.create_default_context()
             remote_ctx.check_hostname = False
             remote_ctx.verify_mode = ssl.CERT_NONE
+            # 关键修复 (已对真实 ggws 服务器实测): 服务器只提供 AES128-GCM-SHA256
+            # 这类 RSA 密钥交换套件 (无前向保密)。Python 默认安全级别(SECLEVEL=2)
+            # 直接禁用这些套件 → 与服务器无共同套件 → 服务器回 handshake_failure
+            # (SSLV3_ALERT_HANDSHAKE_FAILURE)。降到 SECLEVEL=1 即可与浏览器一样
+            # 协商成功。(我们不校验上游证书, 所以放宽不影响安全。)
+            try:
+                remote_ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
+            except Exception:
+                pass
             remote_raw = socket.create_connection((hostname, port), timeout=15)
             remote_ssl = remote_ctx.wrap_socket(remote_raw, server_hostname=hostname)
-            self._diag("  %s: upstream TLS OK" % hostname)
+            self._diag("  %s: upstream TLS OK (%s/%s)"
+                       % (hostname, remote_ssl.version(),
+                          remote_ssl.cipher()[0] if remote_ssl.cipher() else "?"))
 
             client_ssl.settimeout(60)
 
